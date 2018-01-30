@@ -113,11 +113,14 @@ computos <- computos_p %>%
 
 # tomamos muestra
 tamano_muestra <- computos %>% 
-    group_by(ESTRATO) %>% 
+    group_by(ID_ESTADO, ESTRATO) %>% 
     summarise(n_casillas = n()) %>% 
     ungroup() %>% 
     mutate(n_muestra = round(n_casillas / sum(n_casillas) * n))
 
+tamano_muestra %>% 
+    group_by(ID_ESTADO) %>% 
+    summarise(sum(n_muestra))
 ```
 
 Por efectos de redondeo la muestra final tiene `r sum(tamano_muestra$n_muestra)`
