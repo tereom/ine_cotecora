@@ -1,0 +1,409 @@
+---
+title: "Diseño muestral"
+output:
+  html_document:
+    css: ../codigo-estilos/cajas.css
+    theme: spacelab
+---
+
+Estrtificación nacional igual y quizá sin casilla
+Refinamiento de estratificación nacional al menos inicialmente
+Precisión 0.5%-1%
+80% CAEs 1 casilla
+
+```{r options, echo = FALSE, message=FALSE, error=TRUE, warning=FALSE}
+knitr::opts_chunk$set(
+    comment = "#>",
+    collapse = TRUE,
+    message = FALSE, 
+    warning = FALSE,
+    error = FALSE,
+    cache = TRUE, 
+    echo = FALSE
+)
+comma <- function(x) format(x, digits = 2, big.mark = ",")
+```
+
+### Guanajuato
+
+```{r, message=FALSE}
+library(tidyverse)
+
+gto <- read_delim("datos/Resultados electorales estatales/_11_Guanajuato_2012.txt", 
+    "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
+#glimpse(gto)
+```
+
+```{r}
+# creamos variable ARE
+gto_votos <- gto %>% 
+    mutate(
+        casilla_id = 1:n(),
+        distrito_f = DISTRITO_FEDERAL_2012, 
+        distrito_l = DISTRITO_LOCAL_2012,
+        are_id = stringr::str_c(distrito_f, 
+            ID_AREA_RESPONSABILIDAD_2E_2012, sep = "-"), 
+        seccion = Seccion,
+        casilla = Tipo_seccion_8feb2012 ,
+        pri = PRI + PVEM + `PRI-PVEM`, 
+        pan = PAN + `PAN-NA` + X13, 
+        prd = PRD, 
+        otros = PT + MC + `No registrados` + Nulos + X13,
+        total = pri + pan + prd + otros,
+        ln = LN
+        ) %>% 
+    select(casilla_id:ln) 
+
+```
+
+* Usando asignación proporcional al tamaño de cada estrato en la elección 
+federal resulta en que a Guanajuato le tocan 358 casillas.
+
+* Construimos la variable ARE como Distrito Federal - 
+ID_AREA_RESPONSABILIDAD_2E_2012, de esta manera resulta que contamos con 
+*`r dplyr::n_distinct(gto_votos$are_id)`* CAEs.
+
+Resultados de elección estatal 2012:
+
+```{r}
+p_partido <- gto_votos %>% 
+    gather(partido, votos, pri:otros) %>% 
+    group_by(partido) %>% 
+    summarise(n_votos = sum(votos)) %>% 
+    mutate(p_votos = round(100 * n_votos / sum(n_votos), 2)) %>% 
+    arrange(-p_votos)
+p_partido %>% 
+    knitr::kable()
+    
+```
+
+### Benchmark MAS
+
+Errores estándar con distintos tamaños de muestra.
+
+```{r}
+tamanos_muestra <- c(50, 100, 200, 300, 385, 500, 600, 700)
+
+mas <- function(datos, n = 100){
+    muestra <- sample_n(datos, n)
+    est <- muestra %>% 
+        gather(partido, votos, pri:otros) %>% 
+        group_by(partido) %>% 
+        summarise(n_votos = sum(votos)) %>% 
+        mutate(p_votos = 100 * n_votos / sum(n_votos)) %>% 
+        select(-n_votos)
+    return(list(est = est, casillas_are = table(muestra$are_id)))
+    
+} 
+
+mas_resumen <- function(datos, n = 100, B = 200){
+    mas_gto <- rerun(B, mas(datos, n = n))
+    
+    n_are <- map(mas_gto, ~.$casillas_are) %>% 
+        flatten_dbl()
+    
+    df_ee <- map_df(mas_gto, ~.$est) %>% 
+        group_by(partido) %>% 
+        summarise(ee = sd(p_votos)) %>% 
+        mutate(n = n)
+    
+    return(list(df_ee = df_ee, n_are = n_are))
+}
+
+tabla_ee <- function(lista_datos){
+    map_df(lista_datos, ~.$df_ee) %>% 
+        mutate(error_est = round(ee, 2)) %>% 
+        select(-ee) %>% 
+        spread(n, error_est) %>% 
+        knitr::kable()
+}
+
+tabla_are <- function(lista_datos){
+    lista_n_are <- map(lista_datos, ~.$n_are)
+    df_n_are <- set_names(lista_n_are, tamanos_muestra) %>% 
+        map_dfr(~data_frame(are = names(.), frec = .), .id = "n")
+    tabla_are <- df_n_are %>% 
+        mutate(n = as.numeric(n)) %>% 
+        group_by(n) %>% 
+        summarise(
+            media = round(mean(frec), 1), 
+            mediana = median(frec), 
+            max = max(frec),
+            mas_1 = round(100 * mean(frec > 1)) # % con más de una
+            ) %>% 
+        knitr::kable()
+    return(list(df_n_are = df_n_are, tabla_are = tabla_are))
+}
+
+ee_mas <- map(tamanos_muestra, ~mas_resumen(gto_votos, n = .))
+tabla_ee(ee_mas)
+```
+
+Resumen de casillas por ARE, las estadísticas se calculan a lo largo de 100
+replicaciones de la muestra para cada tamaño de muestra propuesto (*n*), la 
+columna *mas_1* indica el porcentaje de AREs con
+más de una casilla:
+
+```{r}
+tab_are_mas <- tabla_are(ee_mas)
+tab_are_mas$tabla_are
+```
+
+
+### Estratificación
+
+1. Distrito Federal
+
+```{r}
+mss <- function(marco_muestral, n = 100){
+    muestra <- marco_muestral %>% 
+        split(.$estrato) %>% 
+        map_df(~sample_n(., size = first(.$n_h)))
+    
+    est <- muestra %>% 
+        gather(partido, votos, pri:otros) %>% 
+        mutate(
+            aux_num = N_h / n_h * votos
+            ) %>% 
+        group_by(estrato, partido) %>% 
+        summarise(
+            num = sum(aux_num)
+        ) %>% 
+        group_by(partido) %>% 
+        summarise(y = sum(num)) %>% 
+        ungroup() %>% 
+        mutate(r = 100 * y / sum(y)) %>% 
+        select(-y)
+    return(list(est = est, n_muestra = nrow(muestra), 
+        casillas_are = table(muestra$are_id)))
+}
+
+mss_resumen <- function(datos, n = 100, B = 100){
+    marco_muestral <- datos %>% 
+        group_by(estrato) %>% 
+        mutate(N_h = n()) %>% 
+        ungroup() %>% 
+        mutate(
+            n_h = pmax(2, round(N_h / nrow(datos) * n)), # mínimo 2 casillas
+            n_h = pmin(N_h, n_h) # si hay menos de 2 casillas
+            )
+    mss_gto <- rerun(B, mss(marco_muestral, n = n))
+    # n_muestra <- map_dbl(mss_gto, ~.$n_muestra) por si aumenta el tamaño final respecto a planeado
+    n_are <- map(mss_gto, ~.$casillas_are) %>% 
+        flatten_dbl()
+    df_ee <- map_df(mss_gto, ~.$est) %>% 
+        group_by(partido) %>% 
+        summarise(ee = sd(r)) %>% 
+        mutate(n = n)
+    return(list(df_ee = df_ee, n_are = n_are))
+}
+
+
+gto_distrito_f <- gto_votos %>% mutate(estrato = distrito_f) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal da lugar a 
+`r dplyr::n_distinct(gto_distrito_f$estrato)` estratos.
+
+```{r}
+ee_distrito_f <- map(tamanos_muestra, ~mss_resumen(gto_distrito_f, n = .))
+tabla_ee(ee_distrito_f)
+```
+
+Resumen de casillas por ARE, las estadísticas se calculan a lo largo de 100
+replicaciones de la muestra para cada tamaño de muestra propuesto (*n*), la 
+columna *mas_1* indica el porcentaje de AREs con
+más de una casilla:
+
+```{r}
+tab_are_distrito_f <- tabla_are(ee_distrito_f)
+tab_are_distrito_f$tabla_are
+```
+
+
+2. Distrito local
+
+```{r}
+gto_distrito_l <- gto_votos %>% mutate(estrato = distrito_l) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal da lugar a 
+`r dplyr::n_distinct(gto_distrito_l$estrato)` estratos.
+
+```{r}
+ee_distrito_l <- map(tamanos_muestra, ~mss_resumen(gto_distrito_l, n = .))
+tabla_ee(ee_distrito_l)
+```
+
+Promedio de casillas por ARE:
+
+```{r}
+tab_are_distrito_l <- tabla_are(ee_distrito_l)
+tab_are_distrito_l$tabla_are
+```
+
+3. Distrito local x Casilla
+
+```{r}
+gto_distrito_lc <- gto_votos %>% mutate(estrato = stringr::str_c(distrito_l, 
+    (casilla == "U"), sep = "-")) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal da lugar a 
+`r dplyr::n_distinct(gto_distrito_lc$estrato)` estratos.
+
+```{r}
+ee_distrito_lc <- map(tamanos_muestra, ~mss_resumen(gto_distrito_lc, n = .))
+tabla_ee(ee_distrito_lc)
+```
+
+Promedio de casillas por ARE:
+
+```{r}
+tab_are_distrito_lc <- tabla_are(ee_distrito_lc)
+tab_are_distrito_lc$tabla_are
+```
+
+4. Distrito local x Distrito federal x casilla
+
+```{r}
+gto_distrito_lfc <- gto_votos %>% mutate(estrato = stringr::str_c(distrito_l, 
+    distrito_f, (casilla == "U"), sep = "-")) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal da lugar a 
+`r dplyr::n_distinct(gto_distrito_lfc$estrato)` estratos.
+
+```{r}
+ee_distrito_lfc <- map(tamanos_muestra, ~mss_resumen(gto_distrito_lfc, n = .))
+tabla_ee(ee_distrito_lfc)
+```
+
+Promedio de casillas por ARE:
+
+```{r}
+tab_are_distrito_lfc <- tabla_are(ee_distrito_lfc)
+tab_are_distrito_lfc$tabla_are
+```
+
+
+### Resumen
+
+En la siguiente gráfica vemos los errores estándar para distintos tamaños de 
+muestra y diseños. La línea horizontal indica un error estándar
+
+```{r}
+ee_mas_plot <- data.frame(map_df(ee_mas, ~.$df_ee), disenio = "MAS", 
+    stringsAsFactors = FALSE)
+ee_distrito_f_plot <- data.frame(map_df(ee_distrito_f, ~.$df_ee), 
+    disenio = "Estr. DF", stringsAsFactors = FALSE)
+ee_distrito_l_plot <- data.frame(map_df(ee_distrito_l, ~.$df_ee), 
+    disenio = "Estr. DL", stringsAsFactors = FALSE)
+ee_distrito_lc_plot <- data.frame(map_df(ee_distrito_lc, ~.$df_ee), 
+    disenio = "Estr. DLxT", stringsAsFactors = FALSE)
+ee_distrito_lfc_plot <- data.frame(map_df(ee_distrito_lfc, ~.$df_ee), 
+    disenio = "Estr. DLxDFxT", stringsAsFactors = FALSE)
+
+ee_plot <- bind_rows(ee_mas_plot, ee_distrito_f_plot, ee_distrito_l_plot, ee_distrito_lc_plot, 
+    ee_distrito_lfc_plot)
+
+ggplot(ee_plot, aes(x = n, y = ee, color = disenio)) +
+    geom_hline(yintercept = 0.5, color = "red", alpha = 0.5) +
+    geom_smooth(method = "loess", se = FALSE, size = 0.5) +
+    facet_wrap(~partido) +
+    geom_text(data = p_partido, aes(x = 600, y = 1.6, 
+        label = stringr::str_c("% ", p_votos)), color = "black") +
+    labs(title = "Errores estándar", y = "", x = "tamaño muestra")
+```
+
+En los mapas de abajo podemos ver como se divide el voto de los distritos a lo
+largo de los distritos federales y locales. Podemos ver que algunos de los estratos 
+son *homogéneos* en particular en los distritos locales, lo que explica las 
+ganancias de la estratificación.
+
+Usamos los datos de [Estadísticas censales a escalas geoelectorales](http://gaia.inegi.org.mx/geoelectoral/viewer.html#) del censo
+2010.
+
+```{r cache=TRUE, message=FALSE, warning=FALSE}
+library(plotly)
+library(rgdal)
+library(maptools)
+library(ggthemes)
+
+# % votos en favor de cada candidato (por sección)
+gto_seccion <- gto_votos %>% 
+    gather(partido, votos, pri:otros) %>% 
+    group_by(seccion, partido) %>% 
+    summarise(
+        n_votos = sum(votos)
+        ) %>% 
+    group_by(seccion) %>% 
+    mutate(p_votos = 100 * n_votos / sum(n_votos))
+
+# porcentaje por partido
+gto_porcents <- gto_seccion %>% select(-n_votos) %>% spread(partido, p_votos)
+
+# ganador en cada sección    
+gto_ganador <- gto_seccion %>% 
+    top_n(1, p_votos)
+
+gto_dl <- gto_votos %>% 
+    group_by(seccion) %>% 
+    summarise(
+        distrito_l = first(distrito_l)
+        )
+
+
+# mapas secciones
+gto_shp_secciones <- readOGR("datos/GTO/", "secciones_11")
+gto_secciones <- gto_shp_secciones@data %>% 
+    mutate(seccion = as.numeric(stringr::str_sub(CLAVEGEO, 9, 13)))
+
+# glimpse(gto_secciones)
+
+gto_shp_distritos <- readOGR("datos/GTO/", "distritos_11")
+
+# creamos variable sección
+gto_shp_secciones@data$seccion <- as.numeric(stringr::str_sub(gto_secciones$CLAVEGEO, 9, 13))
+
+gto_shp_secciones@data <- gto_shp_secciones@data %>% 
+    left_join(gto_dl, by = "seccion")
+
+gto_shp_dl <- unionSpatialPolygons(gto_shp_secciones, gto_shp_secciones$distrito_l)
+gto_dl <- fortify(gto_shp_dl)
+
+gto_secciones_poligonos <- fortify(gto_shp_secciones, region = "seccion") %>% 
+    mutate(id = as.numeric(id))
+
+gto_secciones_mapa <- gto_secciones_poligonos %>% 
+    left_join(gto_ganador, by = c("id" = "seccion")) %>% 
+    left_join(gto_porcents, by = c("id" = "seccion"))
+
+gto_distritos <- fortify(gto_shp_distritos)
+mapa_gto_df <- ggplot() +
+    geom_polygon(data = gto_distritos, aes(x = long, y = lat, group = group),
+    fill = NA, color = "darkgray", size = 0.3) + 
+    geom_polygon(data = gto_secciones_mapa, aes(long, lat, group = group, 
+        fill = partido, alpha = round(p_votos), label = pan)) +
+    labs(title = "Distritos Federales", alpha = "% Votos", fill = "Ganador") +
+    coord_fixed() +
+    theme_void() 
+
+mapa_gto_dl <- ggplot() +
+    geom_polygon(data = gto_dl, aes(x = long, y = lat, group = group),
+    fill = NA, color = "darkgray", size = 0.3) + 
+    geom_polygon(data = gto_secciones_mapa, aes(long, lat, group = group, 
+        fill = partido, alpha = round(p_votos), label = pan)) +
+    labs(title = "Distritos Locales", alpha = "% Votos", fill = "Ganador") +
+    coord_fixed() +
+    theme_void() 
+
+ggplotly(mapa_gto_df)
+
+ggplotly(mapa_gto_dl)
+```
+
