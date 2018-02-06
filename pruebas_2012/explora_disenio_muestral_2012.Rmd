@@ -6,11 +6,6 @@ output:
     theme: spacelab
 ---
 
-Estrtificación nacional igual y quizá sin casilla
-Refinamiento de estratificación nacional al menos inicialmente
-Precisión 0.5%-1%
-80% CAEs 1 casilla
-
 ```{r options, echo = FALSE, message=FALSE, error=TRUE, warning=FALSE}
 knitr::opts_chunk$set(
     comment = "#>",
@@ -48,7 +43,7 @@ gto_votos <- gto %>%
         pri = PRI + PVEM + `PRI-PVEM`, 
         pan = PAN + `PAN-NA` + X13, 
         prd = PRD, 
-        otros = PT + MC + `No registrados` + Nulos + X13,
+        otros = PT + MC + `No registrados` + Nulos,
         total = pri + pan + prd + otros,
         ln = LN
         ) %>% 
@@ -79,7 +74,7 @@ p_partido %>%
 
 ### Benchmark MAS
 
-Errores estándar con distintos tamaños de muestra.
+Precisiones con distintos tamaños de muestra.
 
 ```{r}
 tamanos_muestra <- c(50, 100, 200, 300, 385, 500, 600, 700)
@@ -110,9 +105,9 @@ mas_resumen <- function(datos, n = 100, B = 200){
     return(list(df_ee = df_ee, n_are = n_are))
 }
 
-tabla_ee <- function(lista_datos){
+tabla_ee <- function(lista_datos, precision = FALSE){
     map_df(lista_datos, ~.$df_ee) %>% 
-        mutate(error_est = round(ee, 2)) %>% 
+        mutate(error_est = round(ee + ee * precision, 2)) %>% 
         select(-ee) %>% 
         spread(n, error_est) %>% 
         knitr::kable()
@@ -128,15 +123,16 @@ tabla_are <- function(lista_datos){
         summarise(
             media = round(mean(frec), 1), 
             mediana = median(frec), 
-            max = max(frec),
-            mas_1 = round(100 * mean(frec > 1)) # % con más de una
+            # max = max(frec),
+            mas_1 = round(100 * mean(frec > 1)),  # % con más de una
+            mas_2 = round(100 * mean(frec > 2)) # % con más de dos
             ) %>% 
-        knitr::kable()
+        knitr::kable(col.names = c("# casillas", "media", "mediana", "%más 1", "%más 2"))
     return(list(df_n_are = df_n_are, tabla_are = tabla_are))
 }
 
 ee_mas <- map(tamanos_muestra, ~mas_resumen(gto_votos, n = .))
-tabla_ee(ee_mas)
+tabla_ee(ee_mas, precision = TRUE)
 ```
 
 Resumen de casillas por ARE, las estadísticas se calculan a lo largo de 100
@@ -198,6 +194,29 @@ mss_resumen <- function(datos, n = 100, B = 100){
     return(list(df_ee = df_ee, n_are = n_are))
 }
 
+est_estratos <- function(datos){
+    estratos <- datos %>% 
+        group_by(estrato) %>% 
+        summarise(
+            n_casillas = n(), 
+            n_ares = n_distinct(are_id)
+        )
+    # estadísticas de estratos
+    resumen_estratos <- estratos %$%
+        tribble(
+            ~est, ~val,
+            # "ESTRATOS", "",
+            "# estratos", round(length(n_casillas)), 
+            "media casillas", round(mean(n_casillas)), 
+            "mediana casillas", round(median(n_casillas)), 
+            "# estratos < 50", sum(n_casillas < 50)
+            # caes por estrato
+            # "media_caes", round(mean(n_ares)), 
+            # "mediana_caes", round(median(n_ares))
+        ) %>% 
+        knitr::kable(col.names = c("Estratos", ""))
+    return(resumen_estratos)
+}
 
 gto_distrito_f <- gto_votos %>% mutate(estrato = distrito_f) %>% 
     select(casilla_id, are_id, estrato, pri:otros)
@@ -207,8 +226,15 @@ La estratificación por distrito federal da lugar a
 `r dplyr::n_distinct(gto_distrito_f$estrato)` estratos.
 
 ```{r}
+est_estratos(gto_distrito_f)
+```
+
+Con este diseño de muestreo se obtienen las siguientes precisiones con distintos
+tamaños de muestra.
+
+```{r}
 ee_distrito_f <- map(tamanos_muestra, ~mss_resumen(gto_distrito_f, n = .))
-tabla_ee(ee_distrito_f)
+tabla_ee(ee_distrito_f, precision = TRUE)
 ```
 
 Resumen de casillas por ARE, las estadísticas se calculan a lo largo de 100
@@ -233,8 +259,14 @@ La estratificación por distrito federal da lugar a
 `r dplyr::n_distinct(gto_distrito_l$estrato)` estratos.
 
 ```{r}
+est_estratos(gto_distrito_l)
+```
+
+Y las siguientes precisiones:
+
+```{r}
 ee_distrito_l <- map(tamanos_muestra, ~mss_resumen(gto_distrito_l, n = .))
-tabla_ee(ee_distrito_l)
+tabla_ee(ee_distrito_l, precision = TRUE)
 ```
 
 Promedio de casillas por ARE:
@@ -256,8 +288,14 @@ La estratificación por distrito federal da lugar a
 `r dplyr::n_distinct(gto_distrito_lc$estrato)` estratos.
 
 ```{r}
+est_estratos(gto_distrito_lc)
+```
+
+Y las siguientes precisiones:
+
+```{r}
 ee_distrito_lc <- map(tamanos_muestra, ~mss_resumen(gto_distrito_lc, n = .))
-tabla_ee(ee_distrito_lc)
+tabla_ee(ee_distrito_lc, precision = TRUE)
 ```
 
 Promedio de casillas por ARE:
@@ -267,7 +305,36 @@ tab_are_distrito_lc <- tabla_are(ee_distrito_lc)
 tab_are_distrito_lc$tabla_are
 ```
 
-4. Distrito local x Distrito federal x casilla
+4. Distrito local x Distrito federal
+
+```{r}
+gto_distrito_lf <- gto_votos %>% mutate(estrato = stringr::str_c(distrito_l, 
+    distrito_f, sep = "-")) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal da lugar a 
+`r dplyr::n_distinct(gto_distrito_lf$estrato)` estratos.
+
+```{r}
+est_estratos(gto_distrito_lf)
+```
+
+Y las siguientes precisiones:
+
+```{r}
+ee_distrito_lf <- map(tamanos_muestra, ~mss_resumen(gto_distrito_lf, n = .))
+tabla_ee(ee_distrito_lf, precision = TRUE)
+```
+
+Promedio de casillas por ARE:
+
+```{r}
+tab_are_distrito_lf <- tabla_are(ee_distrito_lf)
+tab_are_distrito_lf$tabla_are
+```
+
+5. Distrito local x Distrito federal x casilla
 
 ```{r}
 gto_distrito_lfc <- gto_votos %>% mutate(estrato = stringr::str_c(distrito_l, 
@@ -279,8 +346,14 @@ La estratificación por distrito federal da lugar a
 `r dplyr::n_distinct(gto_distrito_lfc$estrato)` estratos.
 
 ```{r}
+est_estratos(gto_distrito_lfc)
+```
+
+Y las siguientes precisiones:
+
+```{r}
 ee_distrito_lfc <- map(tamanos_muestra, ~mss_resumen(gto_distrito_lfc, n = .))
-tabla_ee(ee_distrito_lfc)
+tabla_ee(ee_distrito_lfc, precision = TRUE)
 ```
 
 Promedio de casillas por ARE:
@@ -290,11 +363,10 @@ tab_are_distrito_lfc <- tabla_are(ee_distrito_lfc)
 tab_are_distrito_lfc$tabla_are
 ```
 
-
 ### Resumen
 
-En la siguiente gráfica vemos los errores estándar para distintos tamaños de 
-muestra y diseños. La línea horizontal indica un error estándar
+En la siguiente gráfica vemos las precisiones estándar para distintos tamaños de 
+muestra y diseños. La línea horizontal indica una precisión del 1%.
 
 ```{r}
 ee_mas_plot <- data.frame(map_df(ee_mas, ~.$df_ee), disenio = "MAS", 
@@ -305,19 +377,24 @@ ee_distrito_l_plot <- data.frame(map_df(ee_distrito_l, ~.$df_ee),
     disenio = "Estr. DL", stringsAsFactors = FALSE)
 ee_distrito_lc_plot <- data.frame(map_df(ee_distrito_lc, ~.$df_ee), 
     disenio = "Estr. DLxT", stringsAsFactors = FALSE)
+ee_distrito_lf_plot <- data.frame(map_df(ee_distrito_lf, ~.$df_ee), 
+    disenio = "Estr. DLxDF", stringsAsFactors = FALSE)
 ee_distrito_lfc_plot <- data.frame(map_df(ee_distrito_lfc, ~.$df_ee), 
     disenio = "Estr. DLxDFxT", stringsAsFactors = FALSE)
 
 ee_plot <- bind_rows(ee_mas_plot, ee_distrito_f_plot, ee_distrito_l_plot, ee_distrito_lc_plot, 
-    ee_distrito_lfc_plot)
+    ee_distrito_lf_plot, ee_distrito_lfc_plot)
 
-ggplot(ee_plot, aes(x = n, y = ee, color = disenio)) +
-    geom_hline(yintercept = 0.5, color = "red", alpha = 0.5) +
+precision_plot <- ggplot(ee_plot, aes(x = n, y = 1.96 * ee, color = disenio)) +
+    geom_hline(yintercept = 1, color = "red", alpha = 0.5) +
     geom_smooth(method = "loess", se = FALSE, size = 0.5) +
     facet_wrap(~partido) +
-    geom_text(data = p_partido, aes(x = 600, y = 1.6, 
+    geom_text(data = p_partido, aes(x = 600, y = 2.6, 
         label = stringr::str_c("% ", p_votos)), color = "black") +
-    labs(title = "Errores estándar", y = "", x = "tamaño muestra")
+    labs(title = "Precisiones", y = "", x = "tamaño muestra", color = "Diseño") +
+    theme_bw()
+
+ggplotly(precision_plot)
 ```
 
 En los mapas de abajo podemos ver como se divide el voto de los distritos a lo
@@ -334,15 +411,15 @@ library(rgdal)
 library(maptools)
 library(ggthemes)
 
-# % votos en favor de cada candidato (por sección)
+# % votos en favor de cada candidato (por sección) y % casillas rurales
 gto_seccion <- gto_votos %>% 
     gather(partido, votos, pri:otros) %>% 
     group_by(seccion, partido) %>% 
     summarise(
-        n_votos = sum(votos)
+        n_votos = sum(votos), 
         ) %>% 
     group_by(seccion) %>% 
-    mutate(p_votos = 100 * n_votos / sum(n_votos))
+    mutate(p_votos = round(100 * n_votos / sum(n_votos)))
 
 # porcentaje por partido
 gto_porcents <- gto_seccion %>% select(-n_votos) %>% spread(partido, p_votos)
@@ -351,10 +428,14 @@ gto_porcents <- gto_seccion %>% select(-n_votos) %>% spread(partido, p_votos)
 gto_ganador <- gto_seccion %>% 
     top_n(1, p_votos)
 
+# mapa distrito local y tipo casilla (las secciones son homogéneas en rural)
 gto_dl <- gto_votos %>% 
+    mutate(rural = casilla == "R") %>% 
     group_by(seccion) %>% 
     summarise(
-        distrito_l = first(distrito_l)
+        distrito_l = first(distrito_l), 
+        p_rural = ifelse(first(rural), "rural", "urbana/mixta"), 
+        n_casillas = n()
         )
 
 
@@ -374,7 +455,7 @@ gto_shp_secciones@data <- gto_shp_secciones@data %>%
     left_join(gto_dl, by = "seccion")
 
 gto_shp_dl <- unionSpatialPolygons(gto_shp_secciones, gto_shp_secciones$distrito_l)
-gto_dl <- fortify(gto_shp_dl)
+gto_dl_plot <- fortify(gto_shp_dl)
 
 gto_secciones_poligonos <- fortify(gto_shp_secciones, region = "seccion") %>% 
     mutate(id = as.numeric(id))
@@ -387,23 +468,43 @@ gto_distritos <- fortify(gto_shp_distritos)
 mapa_gto_df <- ggplot() +
     geom_polygon(data = gto_distritos, aes(x = long, y = lat, group = group),
     fill = NA, color = "darkgray", size = 0.3) + 
-    geom_polygon(data = gto_secciones_mapa, aes(long, lat, group = group, 
-        fill = partido, alpha = round(p_votos), label = pan)) +
-    labs(title = "Distritos Federales", alpha = "% Votos", fill = "Ganador") +
+    geom_polygon(data = filter(gto_secciones_mapa, !is.na(pan)), 
+        aes(long, lat, group = group, fill = partido, alpha = p_votos, label = pan)) +
+    labs(title = "", alpha = "", fill = "") +
     coord_fixed() +
     theme_void() 
 
 mapa_gto_dl <- ggplot() +
-    geom_polygon(data = gto_dl, aes(x = long, y = lat, group = group),
+    geom_polygon(data = gto_dl_plot, aes(x = long, y = lat, group = group),
     fill = NA, color = "darkgray", size = 0.3) + 
-    geom_polygon(data = gto_secciones_mapa, aes(long, lat, group = group, 
-        fill = partido, alpha = round(p_votos), label = pan)) +
-    labs(title = "Distritos Locales", alpha = "% Votos", fill = "Ganador") +
+    geom_polygon(data = filter(gto_secciones_mapa, !is.na(pan)), aes(long, lat, group = group, 
+        fill = partido, alpha = p_votos, label = pan)) +
+    labs(title = "Distritos Federales y Locales", alpha = "", fill = "Ganador") +
     coord_fixed() +
     theme_void() 
 
-ggplotly(mapa_gto_df)
+vars_tooltip <- c("partido", "p_votos", "pan")
+p1 <- ggplotly(mapa_gto_df, tooltip = vars_tooltip, 
+                 dynamicTicks = TRUE)
+p2 <- ggplotly(mapa_gto_dl, tooltip = vars_tooltip, 
+                 dynamicTicks = TRUE)
+subplot(style(p1, showlegend = FALSE), p2, margin = 0.03, shareY= TRUE)
+```
+El siguiente mapa muestra las secciones rurales y no rurales (urbanas y mixtas), 
+la transparencia indica el número de casillas en la sección.
 
-ggplotly(mapa_gto_dl)
+```{r, fig.height=5, fig.width = 5}
+gto_rural_plot <- left_join(gto_secciones_mapa, gto_dl, by = c("id" = "seccion"))
+
+mapa_gto_dl_rural <- ggplot() +
+    geom_polygon(data = gto_dl_plot, aes(x = long, y = lat, group = group),
+    fill = NA, color = "darkgray", size = 0.3) + 
+    geom_polygon(data = filter(gto_rural_plot, !is.na(n_casillas)), 
+        aes(long, lat, group = group, fill = p_rural, alpha = n_casillas)) +
+    labs(fill = "", title = "Rural/No rural", alpha =  "") +
+    coord_fixed() +
+    theme_void() 
+
+ggplotly(mapa_gto_dl_rural)
 ```
 
