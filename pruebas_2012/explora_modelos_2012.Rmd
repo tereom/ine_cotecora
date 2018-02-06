@@ -503,10 +503,15 @@ electos por el principio de representación proporcional. Hay 5 circunscripcione
 
 **Tipo de casilla** 
     + Básica(B): Se instalan en secciones que tienen un número no mayor a 750 electores.
+    
     + Contigua(C): Cuando el número de electores de la sección es superior a 750, éstas se instalan.
+    
     + Extraordinaria(E): Atienden a residentes de una sección, que por condiciones de vías de comunicación o socio culturales, tengan difícil acceso
+    
     + Especial(S): Se instalan para que los electores fuera de la sección correspondiente a su domicilio puedan votar. 
-    + V: Casilla en el extranjero.
+    
+    + Extranjero(M,V): Casilla en el extranjero, en la base nacional codificado como M, en 
+    la muestra codificado como V.
     
 ### Ideas
 
