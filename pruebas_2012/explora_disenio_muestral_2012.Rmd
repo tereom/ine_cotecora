@@ -23,6 +23,7 @@ comma <- function(x) format(x, digits = 2, big.mark = ",")
 
 ```{r, message=FALSE}
 library(tidyverse)
+library(plotly)
 
 gto <- read_delim("datos/Resultados electorales estatales/_11_Guanajuato_2012.txt", 
     "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
@@ -77,7 +78,7 @@ p_partido %>%
 Precisiones con distintos tamaños de muestra.
 
 ```{r}
-tamanos_muestra <- c(50, 100, 200, 300, 385, 500, 600, 700)
+tamanos_muestra <- c(50, 100, 200, 300, 358, 500, 600, 700)
 
 mas <- function(datos, n = 100){
     muestra <- sample_n(datos, n)
@@ -91,7 +92,7 @@ mas <- function(datos, n = 100){
     
 } 
 
-mas_resumen <- function(datos, n = 100, B = 200){
+mas_resumen <- function(datos, n = 100, B = 500){
     mas_gto <- rerun(B, mas(datos, n = n))
     
     n_are <- map(mas_gto, ~.$casillas_are) %>% 
@@ -405,7 +406,7 @@ ganancias de la estratificación.
 Usamos los datos de [Estadísticas censales a escalas geoelectorales](http://gaia.inegi.org.mx/geoelectoral/viewer.html#) del censo
 2010.
 
-```{r cache=TRUE, message=FALSE, warning=FALSE}
+```{r cache=TRUE, message=FALSE, warning=FALSE, fig.height=7, fig.width=9}
 library(plotly)
 library(rgdal)
 library(maptools)
@@ -416,7 +417,7 @@ gto_seccion <- gto_votos %>%
     gather(partido, votos, pri:otros) %>% 
     group_by(seccion, partido) %>% 
     summarise(
-        n_votos = sum(votos), 
+        n_votos = sum(votos) 
         ) %>% 
     group_by(seccion) %>% 
     mutate(p_votos = round(100 * n_votos / sum(n_votos)))
@@ -490,10 +491,11 @@ p2 <- ggplotly(mapa_gto_dl, tooltip = vars_tooltip,
                  dynamicTicks = TRUE)
 subplot(style(p1, showlegend = FALSE), p2, margin = 0.03, shareY= TRUE)
 ```
-El siguiente mapa muestra las secciones rurales y no rurales (urbanas y mixtas), 
-la transparencia indica el número de casillas en la sección.
 
-```{r, fig.height=5, fig.width = 5}
+<!-- El siguiente mapa muestra las secciones rurales y no rurales (urbanas y mixtas), 
+la transparencia indica el número de casillas en la sección.
+-->
+```{r, fig.height=5, fig.width = 5, include = FALSE}
 gto_rural_plot <- left_join(gto_secciones_mapa, gto_dl, by = c("id" = "seccion"))
 
 mapa_gto_dl_rural <- ggplot() +
