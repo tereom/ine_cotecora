@@ -285,7 +285,7 @@ gto_distrito_lc <- gto_votos %>% mutate(estrato = stringr::str_c(distrito_l,
     select(casilla_id, are_id, estrato, pri:otros)
 ```
 
-La estratificación por distrito federal da lugar a 
+La estratificación por distrito local y tipo de casilla da lugar a 
 `r dplyr::n_distinct(gto_distrito_lc$estrato)` estratos.
 
 ```{r}
@@ -510,3 +510,233 @@ mapa_gto_dl_rural <- ggplot() +
 ggplotly(mapa_gto_dl_rural)
 ```
 
+***
+
+# Nacional
+
+```{r, message=FALSE}
+library(tidyverse)
+library(plotly)
+
+nal <- read_delim("datos/Resultados electorales federales/Computos_Distritales_Presidente_2012.txt", 
+    "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
+# glimpse(nal)
+```
+
+```{r}
+nal_votos <- nal %>% 
+    mutate(
+        casilla_id = 1:n(),
+        casilla = CASILLA,
+        distrito_f17 = str_c(ID_ESTADO, DISTRITO_FEDERAL_2017, sep = "-"), 
+        distrito_f12 = str_c(ID_ESTADO, DISTRITO_FEDERAL_2012, sep = "-"), 
+        distrito_l = str_c(ID_ESTADO, Distrito_Local_2017, sep = "-"),
+        are_id = stringr::str_c(distrito_f12, ID_AREA_RESPONSABILIDAD_2E__2012, 
+            sep = "-"), 
+        seccion = SECCION,
+        pri = PRI + PVEM + PRI_PVEM, 
+        pan = PAN, 
+        prd = PRD + PT + MC + PRD_PT + PRD_MC + PT_MC + PRD_PT_MC, 
+        otros = PANAL + NUM_VOTOS_NULOS + NUM_VOTOS_CAN_NREG,
+        total = TOTAL_VOTOS
+        ) %>% 
+    select(casilla_id:total) 
+
+```
+
+Resultados de elección federal 2012.
+
+```{r}
+p_partido <- nal_votos %>% 
+    gather(partido, votos, pri:otros) %>% 
+    group_by(partido) %>% 
+    summarise(n_votos = sum(votos)) %>% 
+    mutate(p_votos = round(100 * n_votos / sum(n_votos), 2)) %>% 
+    arrange(-p_votos)
+p_partido %>% 
+    knitr::kable()
+    
+```
+
+### Benchmark MAS
+
+Precisiones con distintos tamaños de muestra.
+
+```{r}
+tamanos_muestra <- c(500, 1000, 2000, 4000, 7500, 8000)
+
+ee_mas <- map(tamanos_muestra, ~mas_resumen(nal_votos, n = .))
+tabla_ee(ee_mas, precision = TRUE)
+```
+
+Resumen de casillas por ARE, las estadísticas se calculan a lo largo de 100
+replicaciones de la muestra para cada tamaño de muestra propuesto (*n*), la 
+columna *mas_1* indica el porcentaje de AREs con
+más de una casilla:
+
+```{r}
+tab_are_mas <- tabla_are(ee_mas)
+tab_are_mas$tabla_are
+```
+
+
+### Estratificación
+
+1. Distrito Federal 2012
+
+```{r}
+nal_distrito_f12 <- nal_votos %>% mutate(estrato = distrito_f12) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal da lugar a 
+`r dplyr::n_distinct(nal_distrito_f12$estrato)` estratos.
+
+```{r}
+est_estratos(nal_distrito_f12)
+```
+
+Con este diseño de muestreo se obtienen las siguientes precisiones con distintos
+tamaños de muestra.
+
+```{r}
+ee_distrito_f12 <- map(tamanos_muestra, ~mss_resumen(nal_distrito_f12, n = .))
+tabla_ee(ee_distrito_f12, precision = TRUE)
+```
+
+Resumen de casillas por ARE, las estadísticas se calculan a lo largo de 100
+replicaciones de la muestra para cada tamaño de muestra propuesto (*n*), la 
+columna *mas_1* indica el porcentaje de AREs con
+más de una casilla:
+
+```{r}
+tab_are_distrito_f12 <- tabla_are(ee_distrito_f12)
+tab_are_distrito_f12$tabla_are
+```
+2. Distrito Federal 2017
+
+```{r}
+nal_distrito_f17 <- nal_votos %>% mutate(estrato = distrito_f17) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal 2017 da lugar a 
+`r dplyr::n_distinct(nal_distrito_f17$estrato)` estratos.
+
+```{r}
+est_estratos(nal_distrito_f17)
+```
+
+Con este diseño de muestreo se obtienen las siguientes precisiones con distintos
+tamaños de muestra.
+
+```{r}
+ee_distrito_f17 <- map(tamanos_muestra, ~mss_resumen(nal_distrito_f17, n = .))
+tabla_ee(ee_distrito_f17, precision = TRUE)
+```
+
+Resumen de casillas por ARE, las estadísticas se calculan a lo largo de 100
+replicaciones de la muestra para cada tamaño de muestra propuesto (*n*), la 
+columna *mas_1* indica el porcentaje de AREs con
+más de una casilla:
+
+```{r}
+tab_are_distrito_f17 <- tabla_are(ee_distrito_f17)
+tab_are_distrito_f17$tabla_are
+```
+
+
+2. Distrito local 2017
+
+```{r}
+nal_distrito_l <- nal_votos %>% mutate(estrato = distrito_l) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito federal da lugar a 
+`r dplyr::n_distinct(nal_distrito_l$estrato)` estratos.
+
+```{r}
+est_estratos(nal_distrito_l)
+```
+
+Y las siguientes precisiones:
+
+```{r}
+ee_distrito_l <- map(tamanos_muestra, ~mss_resumen(nal_distrito_l, n = .))
+tabla_ee(ee_distrito_l, precision = TRUE)
+```
+
+Promedio de casillas por ARE:
+
+```{r}
+tab_are_distrito_l <- tabla_are(ee_distrito_l)
+tab_are_distrito_l$tabla_are
+```
+
+3. Distrito local x Casilla
+
+```{r}
+nal_distrito_lc <- nal_votos %>% mutate(estrato = stringr::str_c(distrito_l, 
+    (casilla == 1), sep = "-")) %>% 
+    select(casilla_id, are_id, estrato, pri:otros)
+```
+
+La estratificación por distrito local x casilla da lugar a 
+`r dplyr::n_distinct(nal_distrito_lc$estrato)` estratos.
+
+```{r}
+est_estratos(nal_distrito_lc)
+```
+
+Y las siguientes precisiones:
+
+```{r}
+ee_distrito_lc <- map(tamanos_muestra, ~mss_resumen(nal_distrito_lc, n = .))
+tabla_ee(ee_distrito_lc, precision = TRUE)
+```
+
+Promedio de casillas por ARE:
+
+```{r}
+tab_are_distrito_lc <- tabla_are(ee_distrito_lc)
+tab_are_distrito_lc$tabla_are
+```
+
+
+### Resumen
+
+En la siguiente gráfica vemos las precisiones estándar para distintos tamaños de 
+muestra y diseños. La línea horizontal indica una precisión del 1%.
+
+```{r}
+ee_mas_plot <- data.frame(map_df(ee_mas, ~.$df_ee), disenio = "MAS", 
+    stringsAsFactors = FALSE)
+ee_distrito_f12_plot <- data.frame(map_df(ee_distrito_f12, ~.$df_ee), 
+    disenio = "Estr. DF 12", stringsAsFactors = FALSE)
+ee_distrito_f17_plot <- data.frame(map_df(ee_distrito_f17, ~.$df_ee), 
+    disenio = "Estr. DF 17", stringsAsFactors = FALSE)
+ee_distrito_l_plot <- data.frame(map_df(ee_distrito_l, ~.$df_ee), 
+    disenio = "Estr. DL", stringsAsFactors = FALSE)
+ee_distrito_lc_plot <- data.frame(map_df(ee_distrito_lc, ~.$df_ee), 
+    disenio = "Estr. DLxT", stringsAsFactors = FALSE)
+# ee_distrito_lf_plot <- data.frame(map_df(ee_distrito_lf, ~.$df_ee), 
+#     disenio = "Estr. DLxDF", stringsAsFactors = FALSE)
+# ee_distrito_lfc_plot <- data.frame(map_df(ee_distrito_lfc, ~.$df_ee), 
+#     disenio = "Estr. DLxDFxT", stringsAsFactors = FALSE)
+
+ee_plot <- bind_rows(ee_mas_plot, ee_distrito_f12_plot, ee_distrito_f17_plot,
+    ee_distrito_l_plot, ee_distrito_lc_plot)
+    # ee_distrito_lf_plot, ee_distrito_lfc_plot)
+
+precision_plot <- ggplot(ee_plot, aes(x = n, y = 1.96 * ee, color = disenio)) +
+    geom_hline(yintercept = 1, color = "red", alpha = 0.5) +
+    geom_smooth(method = "loess", se = FALSE, size = 0.5, span = 1) +
+    facet_wrap(~partido) +
+    geom_text(data = p_partido, aes(x = 600, y = 2.6, 
+        label = stringr::str_c("% ", p_votos)), color = "black") +
+    labs(title = "Precisiones", y = "", x = "tamaño muestra", color = "Diseño") +
+    theme_bw()
+
+ggplotly(precision_plot)
+```
