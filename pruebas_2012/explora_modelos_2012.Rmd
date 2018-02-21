@@ -370,33 +370,56 @@ datos_bayes <- muestra_sim %>%
 
 datos_bayes
 
+# sims_posterior <- function(x_j, n, n_sims = 200){
+#     theta_sims <- rep(NA, n_sims)
+#     tau_sims <- rep(NA, n_sims)
+#     # parámetros Gamma
+#     a_gamma <- (length(n) - 1) / 2
+#     b_gamma <- 1/ 2 * (sum(x_j ^ 2 / n) - sum(x_j) ^ 2 / sum(n))
+#     tau <- rgamma(1, shape = a_gamma, rate = b_gamma)
+#     # parámetros normal
+#     media_normal <- sum(x_j) / sum(n)
+#     desv_normal <- sqrt(1 / (tau * sum(n)))
+#     theta <- rnorm(1, media_normal, desv_normal)
+#     # caminata
+#     m <- 1
+#     while(m <= n_sims){
+#         if(theta > 0 & theta < 1){
+#             theta_sims[m] <- theta
+#             tau_sims[m] <- tau
+#             m <- m + 1
+#         }
+#         tau <- rgamma(1, a_gamma, b_gamma)
+#         desv_normal <- sqrt(1 / (tau * sum(n)))
+#         theta <- rnorm(1, media_normal, desv_normal)
+#     }
+#     return(list(theta_mean = mean(theta_sims), 
+#         sims_list = list(theta = theta_sims, tau = tau_sims), 
+#         n_i = sum(n)))
+# }
+
 sims_posterior <- function(x_j, n, n_sims = 200){
-    theta_sims <- rep(NA, n_sims)
-    tau_sims <- rep(NA, n_sims)
-    # parámetros Gamma
+  theta_sims <- NULL
+  tau_sims <- NULL
+  while(length(theta_sims) < n_sims){
+    # parametros Gamma
     a_gamma <- (length(n) - 1) / 2
     b_gamma <- 1/ 2 * (sum(x_j ^ 2 / n) - sum(x_j) ^ 2 / sum(n))
-    tau <- rgamma(1, shape = a_gamma, rate = b_gamma)
-    # parámetros normal
+    tau <- rgamma(n_sims, shape = a_gamma, rate = b_gamma) # aqui igual y me conviene simular mas, habria que ver que es lo mas eficiente dependiendo de la probabilidad de que theta este en el (0,1)
+    # parametros normal
     media_normal <- sum(x_j) / sum(n)
-    desv_normal <- sqrt(1 / (tau * sum(n)))
-    theta <- rnorm(1, media_normal, desv_normal)
-    # caminata
-    m <- 1
-    while(m <= n_sims){
-        if(theta > 0 & theta < 1){
-            theta_sims[m] <- theta
-            tau_sims[m] <- tau
-            m <- m + 1
-        }
-        tau <- rgamma(1, a_gamma, b_gamma)
-        desv_normal <- sqrt(1 / (tau * sum(n)))
-        theta <- rnorm(1, media_normal, desv_normal)
-    }
-    return(list(theta_mean = mean(theta_sims), 
-        sims_list = list(theta = theta_sims, tau = tau_sims), 
-        n_i = sum(n)))
-}
+    desv_normal <- sapply(tau, function(tau_i){sqrt(1 / (tau_i * sum(n)))})
+    theta <- sapply(desv_normal, function(desv_i){rnorm(1, media_normal, desv_i)})
+    indices <- which(theta > 0 & theta < 1)
+    theta_sims <- c(theta_sims, theta[indices])
+    tau_sims <- c(tau_sims, tau[indices])
+  }
+  return(list(theta_mean = mean(theta_sims[1:n_sims]), 
+              sims_list = list(theta = theta_sims[1:n_sims], tau = tau_sims[1:n_sims]), 
+              n_i = sum(n)))
+  }
+
+
 
 # calculamos la media posterior para cada estrato
 thetas_aux <- datos_bayes %>% 
