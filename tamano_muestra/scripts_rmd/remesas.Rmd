@@ -1,0 +1,90 @@
+---
+title: "Factores de retraso"
+output: html_document
+---
+
+El objetivo es unir las
+bases de varios estados y encontrar factores que afectan la llegada de remesas.
+El análisis quedó pendiente por lo incompleto de las bases de datos.
+
+```{r}
+library(tidyverse)
+library(lubridate)
+
+nayarit <-  readxl::read_excel("../../datos/Muestras de conteos rápidos 2012_2017/Base_Conteo_Nayarit_2017.xlsx")
+nayarit_remesa <-  readxl::read_excel("../../datos/Muestras de conteos rápidos 2012_2017/ConRemesaFinal/Base_Conteo_Nayarit_2017_final.xlsx")
+
+hora_corte <- ymd_hms("2017-06-05 00:40:00")
+
+nayarit_remesa <- nayarit_remesa %>% 
+    mutate(
+        edo = "Nayarit",
+        dia_registro = str_c("2017-06-", DIA), 
+        hora_registro = str_c(HORA, MINUTOS, SEGUNDOS, sep = ":"), 
+        dia_hora_registro = ymd_hms(str_c(dia_registro, hora_registro, sep = " "))
+        ) %>% 
+    select(edo, TIPO_SECCION, REMESA_FINAL, dia_hora_registro, TOTAL)
+  
+nayarit_plot <- bind_rows(nayarit, nayarit_remesa) %>% select(-REMESA_FINAL)
+
+nayarit_remesa %>%
+    # filter(REMESA_FINAL == 1) %>% 
+    group_by(TIPO_SECCION) %>% 
+    summarise(
+        n = n(),
+        # n_remesa = sum(dia_hora_registro < hora_corte, na.rm = TRUE),
+        n_remesa = sum(REMESA_FINAL),
+        hora_min = min(dia_hora_registro, na.rm = TRUE),
+        hora_max = max(dia_hora_registro, na.rm = TRUE), 
+        hora_mediana = median(dia_hora_registro, na.rm = TRUE)
+        )
+
+ggplot(nayarit_plot, aes(x = dia_hora_registro, y = TOTAL, 
+    color = factor(TIPO_SECCION))) +
+    geom_point() +
+    geom_smooth(se = FALSE, span = 1)
+
+```
+
+Nayarit, 25 opciones: `r str_c(colnames(nayarit_remesa)[36:60], sep = ",", collapse = ", ")`, 
+llegó 50% de muestra.
+
+Colima
+
+```{r}
+colima <-  readxl::read_excel("../../datos/Muestras de conteos rápidos 2012_2017/BAse_Conteo_Colima_2016.xlsx")
+
+# hora_corte <- edo = c("Colima"), corte = c(ymd_hms("2017-06-05 00:40:00"))
+
+colima_remesa <- colima %>% 
+    mutate(
+        edo = "Colima",
+        # dia_registro = str_c("2016-01-", DIA), 
+        dia_registro = "2017-06-04", 
+        hora_registro = str_c(HORA, MINUTOS, SEGUNDOS, sep = ":"), 
+        dia_hora_registro = ymd_hms(str_c(dia_registro, hora_registro, sep = " "))
+        ) %>% 
+    select(edo, TIPO_SECCION, dia_hora_registro, TOTAL)
+```
+
+```{r, eval = FALSE}
+veracruz <- readxl::read_excel("../../datos/Muestras de conteos rápidos 2012_2017/Base_Conteo_Veracruz_2016.xlsx")
+
+veracruz_remesa <- veracruz %>% 
+    mutate(
+        edo = "Veracruz",
+        dia_hora_registro = `Fehca y Hora`
+        ) %>% 
+    select(edo, TIPO_SECCION, dia_hora_registro, TOTAL)
+```
+
+```{r, eval=FALSE}
+bind_rows(nayarit_remesa, colima_remesa) %>% 
+    ggplot(aes(x = dia_hora_registro, y = TOTAL, 
+    color = factor(TIPO_SECCION))) +
+    geom_point(alpha = 0.5) +
+    facet_wrap(~edo, ncol = 1) +
+    scale_x_datetime("", date_labels = "%I:%M %p") +
+    geom_smooth(se = FALSE, span = 1)
+```
+

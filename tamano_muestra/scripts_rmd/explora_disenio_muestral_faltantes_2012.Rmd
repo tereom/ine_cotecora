@@ -1,0 +1,246 @@
+---
+title: "Diseño muestral"
+output:
+  html_document:
+    css: ../codigo-estilos/cajas.css
+    theme: spacelab
+---
+
+```{r options, echo = FALSE, message=FALSE, error=TRUE, warning=FALSE}
+knitr::opts_chunk$set(
+    comment = "#>",
+    collapse = TRUE,
+    message = FALSE, 
+    warning = FALSE,
+    error = FALSE,
+    cache = TRUE, 
+    echo = FALSE
+)
+comma <- function(x) format(x, digits = 2, big.mark = ",")
+```
+
+### Guanajuato
+
+```{r, message=FALSE}
+library(tidyverse)
+library(plotly)
+library(quickcount)
+
+gto <- read_delim("../../datos/Resultados electorales estatales/_11_Guanajuato_2012.txt", 
+    "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
+#glimpse(gto)
+```
+
+```{r}
+# creamos variable ARE
+gto_votos <- gto %>% 
+    mutate(
+        casilla_id = 1:n(),
+        distrito_f = DISTRITO_FEDERAL_2012, 
+        distrito_l = DISTRITO_LOCAL_2012,
+        are_id = stringr::str_c(distrito_f, 
+            ID_AREA_RESPONSABILIDAD_2E_2012, sep = "-"), 
+        seccion = Seccion,
+        casilla = Tipo_seccion_8feb2012 ,
+        pri = PRI + PVEM + `PRI-PVEM`, 
+        pan = PAN + `PAN-NA` + X13, 
+        prd = PRD, 
+        otros = PT + MC + `No registrados` + Nulos,
+        total = pri + pan + prd + otros,
+        ln = LN
+        ) %>% 
+    select(casilla_id:ln) 
+
+```
+
+* Usando asignación proporcional al tamaño de cada estrato en la elección 
+federal resulta en que a Guanajuato le tocan 358 casillas.
+
+* Construimos la variable ARE como Distrito Federal - 
+ID_AREA_RESPONSABILIDAD_2E_2012, de esta manera resulta que contamos con 
+*`r dplyr::n_distinct(gto_votos$are_id)`* CAEs.
+
+Resultados de elección estatal 2012:
+
+```{r}
+p_partido <- gto_votos %>% 
+    gather(partido, votos, pri:otros) %>% 
+    group_by(partido) %>% 
+    summarise(n_votos = sum(votos)) %>% 
+    mutate(p_votos = round(100 * n_votos / sum(n_votos), 2)) %>% 
+    arrange(-p_votos)
+p_partido %>% 
+    knitr::kable()
+    
+```
+### Faltantes not missign at random
+Simularemos los faltantes de acuerdo a la llegada de las remesas en la elección
+presidencial de 2012 (para Gto.).
+
+```{r}
+remesas_2012 <- readxl::read_excel("../../datos/Muestras de conteos rápidos 2012_2017/ConRemesaFinal/Base_Conteo_Presidencial 2012_final.xlsx")
+
+remesas_gto <- remesas_2012 %>% 
+  filter(base_pres_id_ESTADO == "11") %>% 
+  mutate(
+    distrito = base_pres_ID_DISTRITO, 
+    remesas,
+    casilla = CASILLA, 
+    hora_transmision = strftime(hora_transmision, format="%H:%M:%S"),
+    dia_hora = FECHA_HORA
+  ) %>% 
+  mutate(
+    antes_10 = dia_hora < ymd_hms("2012-07-01 22:00:00 UTC"), 
+    antes_9 = dia_hora < ymd_hms("2012-07-01 21:00:00 UTC"),
+    antes_8 = dia_hora < ymd_hms("2012-07-01 20:00:00 UTC"),
+    antes_7 = dia_hora < ymd_hms("2012-07-01 19:00:00 UTC")
+    ) %>% 
+  select(distrito:antes_7)
+
+llegada_casilla <- remesas_gto %>% 
+  filter(!is.na(casilla)) %>% 
+  group_by(casilla) %>% 
+  summarise_at(vars(antes_10:antes_7), mean, na.rm = TRUE)
+
+llegada_casilla
+```
+
+```{r}
+llegada_distrito <- remesas_gto %>% 
+  filter(!is.na(casilla)) %>% 
+  group_by(distrito, casilla) %>% 
+  summarise_at(vars(antes_10:antes_7), mean, na.rm = TRUE) %>% 
+  ungroup() %>% 
+  mutate(distrito_casilla = str_c(distrito, casilla, sep = "-"))
+```
+
+
+```{r}
+mss <- function(marco_muestral, n = 100, sim_faltantes = FALSE, faltantes, 
+  var_faltantes, var_fracs){
+    muestra <- marco_muestral %>% 
+        split(.$estrato) %>% 
+        map_df(~sample_n(., size = first(.$n_h)))
+    if(sim_faltantes){
+      muestra <- select_sample_str(muestra, faltantes, var_faltantes, var_fracs, 
+        is_frac = TRUE) 
+    }
+    est <- muestra %>% 
+        gather(partido, votos, pri:otros) %>% 
+        mutate(
+            aux_num = N_h / n_h * votos
+            ) %>% 
+        group_by(estrato, partido) %>% 
+        summarise(
+            num = sum(aux_num)
+        ) %>% 
+        group_by(partido) %>% 
+        summarise(y = sum(num)) %>% 
+        ungroup() %>% 
+        mutate(r = 100 * y / sum(y)) %>% 
+        select(-y)
+    return(list(est = est, n_muestra = nrow(muestra), 
+        casillas_are = table(muestra$are_id)))
+}
+
+mss_resumen <- function(datos, n = 100, B = 100, sim_faltantes = FALSE, 
+  faltantes, var_faltantes, var_fracs){
+    marco_muestral <- datos %>% 
+        group_by(estrato) %>% 
+        mutate(N_h = n()) %>% 
+        ungroup() %>% 
+        mutate(
+            n_h = pmax(2, round(N_h / nrow(datos) * n)), # mínimo 2 casillas
+            n_h = pmin(N_h, n_h) # si hay menos de 2 casillas
+            )
+    
+    if(sim_faltantes){
+        mss_gto <- rerun(B, mss(marco_muestral, n = n, faltantes = faltantes, 
+            var_faltantes = var_faltantes, var_fracs = var_fracs))
+    } else {
+        mss_gto <- rerun(B, mss(marco_muestral, n = n))
+    }
+  n_are = 2
+    df_ee <- map_df(mss_gto, ~.$est) %>% 
+        group_by(partido) %>% 
+        summarise(
+          ee = sd(r), 
+          esperado = mean(r)
+          ) %>% 
+        mutate(n = n)
+    return(list(df_ee = df_ee, n_are = n_are))
+}
+
+est_estratos <- function(datos){
+    estratos <- datos %>% 
+        group_by(estrato) %>% 
+        summarise(
+            n_casillas = n(), 
+            n_ares = n_distinct(are_id)
+        )
+    # estadísticas de estratos
+    resumen_estratos <- estratos %$%
+        tribble(
+            ~est, ~val,
+            # "ESTRATOS", "",
+            "# estratos", round(length(n_casillas)), 
+            "media casillas", round(mean(n_casillas)), 
+            "mediana casillas", round(median(n_casillas)), 
+            "# estratos < 50", sum(n_casillas < 50)
+            # caes por estrato
+            # "media_caes", round(mean(n_ares)), 
+            # "mediana_caes", round(median(n_ares))
+        ) %>% 
+        knitr::kable(col.names = c("Estratos", ""))
+    return(resumen_estratos)
+}
+
+tabla_ee <- function(lista_datos, precision = FALSE){
+    map_df(lista_datos, ~.$df_ee) %>% 
+        mutate(
+          error_est = round(ee + ee * precision, 2), 
+          esperado = round(esperado, 4)) %>% 
+        select(-ee) 
+}
+
+gto_distrito_f <- gto_votos %>% 
+    mutate(estrato = distrito_f, 
+      casilla = (casilla == "U") + 1, 
+      df_casilla = str_c(distrito_f, casilla, sep = "-")) %>% 
+    select(casilla_id, are_id, estrato, pri:otros, df_casilla)
+```
+
+```{r}
+tamanos_muestra <- c(200, 300, 500, 700)
+
+ee_distrito_faltantes_8 <- map(tamanos_muestra, ~mss_resumen(gto_distrito_f, n = ., 
+  sim_faltantes = TRUE, faltantes = llegada_casilla, var_faltantes = casilla, 
+  var_fracs = antes_8))
+ee_distrito_faltantes_9 <- map(tamanos_muestra, ~mss_resumen(gto_distrito_f, n = ., 
+  sim_faltantes = TRUE, faltantes = remesas_df_casilla_2, var_faltantes = df_casilla, 
+  var_fracs = antes_9))
+ee_distrito_faltantes_10 <- map(tamanos_muestra, ~mss_resumen(gto_distrito_f, n = ., 
+  sim_faltantes = TRUE, faltantes = remesas_df_casilla_2, var_faltantes = df_casilla, 
+  var_fracs = antes_10))
+
+ee_distrito <- map(tamanos_muestra, ~mss_resumen(gto_distrito_f, n = .))
+
+esperado_faltantes_8 <- tabla_ee(ee_distrito_faltantes_8, precision = FALSE) %>% 
+  mutate(hora = "antes_8")
+esperado_faltantes_9 <- tabla_ee(ee_distrito_faltantes_9, precision = FALSE) %>% 
+  mutate(hora = "antes_9")
+esperado_faltantes_10 <- tabla_ee(ee_distrito_faltantes_10, precision = FALSE) %>% 
+  mutate(hora = "antes_10")
+esperado_completo <- tabla_ee(ee_distrito, precision = FALSE) %>% 
+  mutate(hora = "completo")
+
+esperado_s <- bind_rows(esperado_faltantes_8, esperado_faltantes_9, 
+  esperado_faltantes_10, esperado_completo)
+
+
+ggplot(esperado_s, aes(x = n, y = esperado, color = hora)) +
+  geom_line() +
+  geom_hline(data = p_partido, aes(yintercept = p_votos), color = "black", 
+    alpha = 0.5) +
+  facet_wrap(~partido, scales = "free_y") 
+```
