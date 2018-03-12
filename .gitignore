@@ -4,3 +4,4 @@
 .Ruserdata
 datos/
 *.html
+*_cache/
