@@ -2,7 +2,6 @@
 title: "Diseño muestral"
 output:
   html_document:
-    css: ../codigo-estilos/cajas.css
     theme: spacelab
 ---
 
@@ -14,7 +13,7 @@ knitr::opts_chunk$set(
     warning = FALSE,
     error = FALSE,
     cache = TRUE, 
-    echo = FALSE
+    echo = TRUE
 )
 comma <- function(x) format(x, digits = 2, big.mark = ",")
 ```
@@ -23,6 +22,8 @@ comma <- function(x) format(x, digits = 2, big.mark = ",")
 
 ```{r, message=FALSE}
 library(tidyverse)
+library(lubridate)
+library(stringr)
 library(plotly)
 library(quickcount)
 
@@ -112,6 +113,11 @@ llegada_distrito <- remesas_gto %>%
   summarise_at(vars(antes_10:antes_7), mean, na.rm = TRUE) %>% 
   ungroup() %>% 
   mutate(distrito_casilla = str_c(distrito, casilla, sep = "-"))
+
+llegada_distrito %>% 
+  gather(horario, p_llegada, antes_10:antes_7) %>% 
+  ggplot(aes(x = reorder(horario, p_llegada), y = p_llegada,  color = factor(casilla))) +
+  geom_boxplot()
 ```
 
 

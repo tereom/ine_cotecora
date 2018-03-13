@@ -25,7 +25,7 @@ comma <- function(x) format(x, digits = 2, big.mark = ",")
 library(tidyverse)
 library(plotly)
 
-gto <- read_delim("datos/Resultados electorales estatales/_11_Guanajuato_2012.txt", 
+gto <- read_delim("../../datos/Resultados electorales estatales/_11_Guanajuato_2012.txt", 
     "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
 #glimpse(gto)
 ```
@@ -407,7 +407,6 @@ Usamos los datos de [Estadísticas censales a escalas geoelectorales](http://gai
 2010.
 
 ```{r cache=TRUE, message=FALSE, warning=FALSE, fig.height=7, fig.width=9}
-library(plotly)
 library(rgdal)
 library(maptools)
 library(ggthemes)
@@ -441,13 +440,13 @@ gto_dl <- gto_votos %>%
 
 
 # mapas secciones
-gto_shp_secciones <- readOGR("datos/GTO/", "secciones_11")
+gto_shp_secciones <- readOGR("../../datos/GTO/", "secciones_11")
 gto_secciones <- gto_shp_secciones@data %>% 
     mutate(seccion = as.numeric(stringr::str_sub(CLAVEGEO, 9, 13)))
 
 # glimpse(gto_secciones)
 
-gto_shp_distritos <- readOGR("datos/GTO/", "distritos_11")
+gto_shp_distritos <- readOGR("../../datos/GTO/", "distritos_11")
 
 # creamos variable sección
 gto_shp_secciones@data$seccion <- as.numeric(stringr::str_sub(gto_secciones$CLAVEGEO, 9, 13))
@@ -518,7 +517,7 @@ ggplotly(mapa_gto_dl_rural)
 library(tidyverse)
 library(plotly)
 
-nal <- read_delim("datos/Resultados electorales federales/Computos_Distritales_Presidente_2012.txt", 
+nal <- read_delim("../../datos/Resultados electorales federales/Computos_Distritales_Presidente_2012.txt", 
     "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
 # glimpse(nal)
 ```
