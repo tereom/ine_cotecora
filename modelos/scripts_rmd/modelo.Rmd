@@ -1,0 +1,152 @@
+---
+title: "R Notebook"
+output: html_notebook
+---
+
+El modelo se ajusta de manera independiente para cada candidato, en lo que sigue
+omitiremos el subíndice que indica el candidato.
+
+$$X_k \sim N(n_k \theta_k, n_{k}\sigma^2)$$
+
+$$\theta_k=\beta^0 + \beta^{rural}\cdot rural_k + \beta^{tipoSp}\cdot tipoSp_k +  \\ 
+\beta^{tipoEx}\cdot tipoEx_k + \beta^{tamanoMd}\cdot tamanoMd_k + \beta^{tamanoGd}\cdot tamanoGd_k + \beta^{distrito}_{distrito(k)}$$
+
+$$\beta_{dl}\sim N(\beta_{region(k)}^{region}, \sigma_{dl}^2)$$
+
+
+
+donde 
+
+* $X_k$ es el número de votos en favor del candidato en la $k$-ésima casilla.
+* $n_k$ es el tamaño de la lista nominal
+* $rural_k$ indica si la casilla es rural
+* $distrito$ indica el distrito local
+* $tamano_k$ indica la calse de tamaño de la sección a la que pertenece la casilla.
+
+
+Pendientes:
+
+* Que hacer en casillas especiales y la variable lista nominal!
+* Pensar en interacciones.
+* Rural/Urbano/Mixto es a nivel sección, hay alguna variable a nivel casilla?
+* En la variable casilla que indican los números: B, C1, C2, C3, E1, E2, S1, 
+E1C1, C4, C5, C6, C7, C8, C9, C10, C11, C12, C13, C14, C15, C16, C17, C18, C19, 
+C20, C21, E1C2, S2, E1C3.
+
+```{r}
+library(tidyverse)
+library(lubridate)
+library(stringr)
+library(plotly)
+library(quickcount)
+
+gto <- read_delim("../../datos/Resultados electorales estatales/_11_Guanajuato_2012.txt", 
+    "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
+glimpse(gto)
+
+gto_votos <- gto %>% 
+    mutate(
+        casilla_id = 1:n(),
+        distrito_l = DISTRITO_LOCAL_2017,
+        seccion = Seccion,
+        tipo = case_when(
+            str_detect(Casilla, "E") ~ 2,
+            str_detect(Casilla, "[B-C]") ~ 1,
+            str_detect(Casilla, "S") ~ 3
+        ),
+        region = case_when(
+            distrito_l %in% c(1, 3:8, 10:13, 18) ~ 1, 
+            TRUE ~ 2
+        ),
+        rural = (Tipo_seccion_8feb2012 == "R") * 1,
+        pri = PRI + PVEM + `PRI-PVEM`, 
+        pan = PAN + `PAN-NA` + X13, 
+        prd = PRD, 
+        otros = PT + MC + `No registrados` + Nulos,
+        total = pri + pan + prd + otros,
+        ln = LN
+        ) %>%
+        group_by(seccion) %>% 
+        mutate(ln_seccion = sum(ln)) %>% 
+        ungroup() %>% 
+        mutate(
+            tamano = case_when(
+                ln_seccion < 1000 ~ 1,
+                ln_seccion < 5000 ~ 2,
+                TRUE ~ 3
+            ), 
+            tamano_md = (tamano == 2) * 1, 
+            tamano_gd = (tamano == 3) * 1, 
+            tipo_ex = (tipo == 2) * 1, 
+            tipo_sp = (tipo == 3) * 1, 
+            ln = ifelse(ln == 0, total, ln)
+          ) %>% 
+        select(casilla_id:tipo_sp)
+
+
+glimpse(gto_votos)
+```
+
+```{r}
+library(R2jags)
+gto_muestra <- select_sample_prop(gto_votos, distrito_l, frac = 0.075)
+gto_no_obs <- anti_join(gto_votos, gto_no_obs, by = "casilla_id")
+gto_no_obs$pan <- NA
+
+
+gto_modelo <- bind_rows(gto_muestra, gto_no_obs)
+
+datos_distrito <- distinct(gto_muestra, distrito_l, region) %>% arrange(distrito_l)
+
+# gto_modelo <- gto_votos
+datos_jags <- list(N = nrow(gto_modelo), n = gto_modelo$ln, 
+    n_distritos = nrow(datos_distrito), n_regiones = n_distinct(datos_distrito$region), 
+    x = gto_modelo$pan,
+    rural = gto_modelo$rural, distrito = gto_modelo$distrito_l, 
+    tamano_md = gto_modelo$tamano_md, 
+    tamano_gd = gto_modelo$tamano_gd, tipo_ex = gto_modelo$tipo_ex, 
+    tipo_sp = gto_modelo$tipo_sp, region = datos_distrito$region)
+
+jags_inits <- function(){
+    list(
+        "beta_0" = rnorm(1), 
+        "beta_rural" = rnorm(1), 
+        "beta_distrito" = rnorm(datos_jags$n_distritos),
+        "beta_tamano_md" = rnorm(1), 
+        "beta_tamano_gd" = rnorm(1), 
+        "beta_tipo_ex" = rnorm(1), 
+        "beta_tipo_sp" = rnorm(1), 
+        "beta_region" = rnorm(datos_jags$n_regiones), 
+        "sigma" = runif(1, 1, 10), 
+        "sigma_distrito" = runif(1, 1, 10)
+    )
+}
+
+fit_1 <- jags(
+    model.file = "../scripts_jags/modelo1.jags",    # modelo de JAGS
+    # inits = jags_inits,   # valores iniciales
+    data = datos_jags,    # lista con los datos
+    parameters.to.save = c("x", "beta_0", "beta_rural", "beta_distrito", 
+        "beta_tamano_md", "beta_tamano_gd", "beta_tipo_ex", "beta_tipo_sp", 
+        "beta_region", "sigma", "sigma_distrito"),  # parámetros por guardar
+    n.chains = 3,   # número de cadenas
+    n.iter = 2000,    # número de pasos
+    n.burnin = 500   # calentamiento de la cadena
+  )
+
+print(fit_1)
+plot(fit_1)
+
+colnames(fit_1$BUGSoutput$sims.matrix)
+
+dim(fit_1$BUGSoutput$sims.list$x)
+votos_pan <- apply(fit_1$BUGSoutput$sims.list$x, 1, sum)
+
+quantile(votos_pan, c(0.025, 0.975))
+```
+
+
+### Supuesto de normalidad
+
+ln_s: categoría de lista nominal en la sección
+
