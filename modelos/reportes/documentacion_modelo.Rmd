@@ -1,0 +1,110 @@
+---
+title: "Procedimiento de estimación"
+output: html_notebook
+---
+
+<!-- La estadística bayesiana es una alternativa a la estadística frecuentista que permite cuantificar la incertidumbre sobre los parámetros desconocidos del modelo mediante distribuciones de probabilidad.   -->
+
+El modelo que utilizaremos para estimar la proporción de votos a favor de cada uno de los candidatos es un modelo Bayesiano de postestratificación con regresión multinivel (Park, Gelman and Bafumi (2004)), que es un método popular para corregir diferencias conocidas entre la muestra y las poblaciones objetivo (Little, 1993). La idea central es dividir a la población en células basadas en combinaciones de diversos atributos demográficos o geográficos, usar la muestra para estimar la variable de respuesta dentro de cada célula, y finalmente agregar las estimaciones de cada célula para estimar a nivel poblacional, ponderando cada célula por su proporción relativa en la población. Así pues, en nuestro escenario, el método se compone por dos pasos, el primero es utilizar una regresión multinivel para estimar el total de votos por casilla y el segundo es postestratificar, es decir, ponderar los votos de cada casilla para obtener los votos por candidato de la población total.
+
+Una regresión multinivel es una regresión en la que los parámetros reciben un modelo de probabilidad. Este modelo de segundo nivel tiene sus propios parámetros, conocidos como hiperparámetros, que también se estiman a partir de los datos. La ganacia principal de utilizar regresión multinivel está en que podemos estudiar los efectos que varían según la célula. Adicionalemente, es posible ajustar más exactamente la falta de respuesta.
+
+Las variables demográficas y geográficas que utilizaremos son:
+
+1) Tipo de sección (rural o urbana/mixta)
+2) Tipo de casilla (básica/contigua/especial o extraordinaria)
+3) Tamaño de sección (chica que es menor a 1000 votantes en la lista nominal, mediana, de 1000 a 5000 votantes o grande, con más de 5000 )
+4) Región (oriente o oxidente)
+5) Distrito local
+
+Además de cada una de las variables, es natural considerar la interacción de tipo de sección con tamaño de sección, pues la relación entre el tipo de sección y la proporción de votos por un candidato es diferente en secciones de distinto tamaño.
+
+Cuando las variables tienen menos de tres categorías, no hay ninguna ganancia en usar un modelo multinivel contra usar distribuciones iniciales no informativas (vease, por ejemplo, Gelman et. al. 2003 y Gelman 2004), por lo que, por simplicidad, modelaremos las variables 1) a 4) como coeficientes de regresión sin estructura multinivel.
+
+El marco muestral consiste en un total de $K$ casillas electorales que se instalarán el día de la elección para que un total de $N$ posibles votantes (tamaño de la lista nominal total) estén en condiciones de ejercer su derecho a voto. Es posible votar a favor de algún candidato registrado, a favor de algún candidato no registrado, es posible anular el voto o simplemente abstenerse a votar. Al conjunto de posibilidades anterior le asignamos las categorías $1,2,...,J$, donde las primeras $J-2$ categorías son los candidatos, la categoría $J-1$ es la de los candidatos no registrados junto con los votos nulos y la categoría $J$ es la de las abstenciones.
+
+<!-- El total de $K$ casillas electorales se reparte en $N$ estratos. Se denotará con $K_i$ al número de casillas en el estrato $i$ para $i=1,...,N$ de modo que $\sum_{i=1}^N K_i = K$ y con $n_k$ al tamaño de la lista nominal en el estrato $i$,  -->
+
+Supongamos que queremos estimar primero el número total de votos para uno de los candidatos, por lo que en lo que sigue omitiremos el superíndice que indica el candidato. Sea $X_k$ el número de votos en favor del candidato en la $k$-ésima casilla, en el primer nivel el modelo asume que:
+
+
+<!-- y sea $N_E$ el número de estratos del estado. Del total de casillas en el estado se seleccionan $c$ de ellas, repartidas en $c_i$ para cada uno de los estratos  $i=1,...,N_E$ de modo que $\sum_{i=1}^{N_E} c_i = c$. -->
+
+$$X_k \sim \mathsf{T}(\mu_k, \  \tau_k, \  \nu_k) \ \mathcal{I}_{[0,750]}$$
+donde,
+$$ \mu_k = b_k n_k \theta_k,$$
+$$ \tau_k = b_k \ \frac{1}{n_k} \ \tau^{\text{distrito}}_k + (1-b_k) \ 10000,$$
+$$ \nu_k = b_k \ \nu^{\text{distrito}}_k + (1-b_k) \ 100,$$
+
+<!-- $$X_k \sim N\left(n_k \theta_k, n_{k}\sigma^2\right),$$ -->
+
+La función indicadora $\mathcal{I}_{[0,750]}$ vale uno si el valor se encuentra en el intervalo [0,750] (que son los posibles valores que puede tomar $X_k$) o cero en otro caso,  el término $n_k$ es el tamaño de la lista nominal de la casilla, $\theta_k$ representa la proporción de personas en la lista nominal de la casilla $k$ que votaron por el candidato y $b_k$ es una variable aleatoria que toma los valores cero o uno dependiendo de la probabilidad de votos del candidato dentro de la casilla. Notemos que si $b_k=0$ entonces
+
+$$X_k \sim \mathsf{T} \left(0, 10000, 100 \right) \ \mathcal{I}_{[0,750]},$$
+indicando que al haber pocos votos, asumimos que el número total de votos tiende a ser unifromemente aleatorio por casilla, de otra forma,
+
+$$X_k \sim \mathsf{T}\left(b_k n_k \theta_k, \ b_k \frac{1}{n_k} \tau^{\text{distrito}}_k \ , \ \nu^{\text{distrito}}_k\right) \ \mathcal{I}_{[0,750]}.$$
+
+Así pues, suponemos que
+
+$$b_k \sim \mathsf{Bernoulli}(p_k)$$
+
+y tanto para la proporción $\theta_k$, como para el parámetro $p_k$, ajustamos un modelo de regresión multinivel
+
+$$\theta_k=\text{logit}^{-1} \left( \beta^0 + \beta^{\text{rural}} \cdot \text{rural}_k + \beta^{\text{rural_tamañoMd}} \cdot \text{rural}_k \cdot \text{tamañoMd}_k + \beta^{\text{tamañoMd}}\cdot \text{tamañoMd}_k +  \\
+\beta^{\text{tamañoGd}}\cdot \text{tamañoGd}_k + \beta^{\text{distrito}}_{\text{distrito}(k)} + 
+\beta^{\text{tipoEx}}\cdot \text{tipoEx}_k \right),$$
+
+$$p_k=\text{logit}^{-1} \left( \beta^0_{\text{p}} + \beta^{\text{rural}}_{\text{p}} \cdot \text{rural}_k + \beta^{\text{rural_tamañoMd}}_{\text{p}} \cdot \text{rural}_k \cdot \text{tamañoMd}_k + \beta^{\text{tamañoMd}}_{\text{p}} \cdot \text{tamañoMd}_k + \\
+\beta^{\text{tamañoGd}}_{\text{p}} \cdot \text{tamañoGd}_k + \beta^{\text{distrito_p}}_{\text{distrito}(k)} + 
+\beta^{\text{tipoEx}}_{\text{p}} \cdot \text{tipoEx}_k \right),$$
+
+donde rural_$k$ indica si la casilla es rural, distrito indica el distrito local y tamano_$k$ indica la clase de tamaño de la sección a la que pertenece la casilla.
+
+
+<!-- El modelo de multinivel "jala" los parámetros de un grupo hacia la media grupal. Los jalará más cuando la desviación estándar del grupo es chica o suavizará para grupos con pocas observaciones -->
+
+Finalmente, ajustamos un modelo multinivel al nivel distrito local:
+
+$$\beta^{\text{distrito}}_{j}\sim \mathsf{N}\left(\mu^{\text{distrito}}, \sigma_{\text{distrito}}^2\right),$$
+
+$$\beta^{\text{distrito_p}}_{j}\sim \mathsf{N}\left(\mu^{\text{distrito}}_{\text{p}}, \sigma_{\text{distrito_p}}^2 \right).$$
+
+<!-- Asignamos una distribución inicial normal a los coeficientes que varían $\beta_{region(j)}^{region}$, con media cero (sin pérdida de generalidad, pues incluímos el término constante $\beta^0$ en el modelo) y desviación estándar $\sigma_{region}$, que se estima de los datos dadas distribuciones iniciales uniformes no informativas.  -->
+
+Al añadir predictores a nivel distrito local se reduce la variación no explicada dentro de cada distrito local y, como consecuencia, se reduce la variación total, produciendo estimaciones más precisas.
+
+<!-- Implementamos el modelo usando el software bayesiano JAGS: Just Another Gibbs Sampler, llamado desde R (R Development Core Team 2003). Corriendo el modelo anterior para todos los posibles candidatos estimamos el número total de votos por cada candidato en cualquier casilla del estado.  -->
+
+Corriendo el modelo anterior para todos los posibles candidatos estimamos la distribución de probabilidad del número total de votos por cada candidato en cualquier casilla del estado. Con esta distribución, es directo estimar la distribución de la proporción efectiva de votos a favor de cada candidato y la distribución de la proporción de participación ciudadana utilizando el siguiente procedimiento.
+
+<!-- Después, calculamos la suma del número total de votos sobre todas las casillas para estimar la proporción de votos para cada candidato a nivel estatal o nacional (según sea el caso) y el porcentaje de participación ciudadana. -->
+
+
+<!-- Ahora, calculamos promedios ponderados de estas probabilidades para estimar la proporción de votos para cada candidato a nivel estatal o nacional (según sea el caso) y el porcentaje de participación ciudadana. -->
+
+<!-- Sea $X^j_k$ es el número de votos en favor del candidato $j$ en la $k$-ésima casilla para j en $1,2,...,J$. El número total de votos para el candidato $j$ está dado por: -->
+<!-- $$X^j = \sum_{k=1}^N X^j_k$$ -->
+<!-- y la proporción de votos a favor del candidato $j$ queda determinada por: -->
+<!-- $$\theta_j = \sum_{k = 1}^N \frac{n_k}{n} X^j_k$$ -->
+
+<!-- No, creo que sólo estamos calculando el total de votos por casilla, entonces al final::: -->
+
+
+
+Sea $X^j_k$ el número de votos en favor del candidato $j$ en la $k$-ésima casilla para j = $1,2,...,J$. El número total de votos para el candidato $j$ está dado por:
+$$X^j = \sum_{k=1}^K X^j_k,$$
+
+la proporción de votos a favor del candidato $j$ queda determinada por:
+
+$$\theta_j = \frac{X^j}{N}$$
+Y la proporción de participación ciudadana es:
+$$ \theta = \sum_{j=1}^{J-1} \theta_j$$
+Notemos que los parámetros de interés no son $\theta_j$, $j = 1,...,J$, pues estamos buscando estimar la proporción de votos *efectiva*, que excluye la categoría de abstenciones, por lo tanto, nos enfocamos en los parámetros:
+$$ \lambda_j = \frac{\theta_j}{\sum_{j=1}^{J-1} \theta_j}$$
+para $j = 1,...,J-1$.
+
+Una vez que tenemos la distribución de la proporción efectiva de votos a favor de cada candidato y la distribución de la proporción de participación ciudadana, los intervalos de credibilidad que presentaremos como resultado son una evaluación simple de estas distribuciones, es decir cada intervalo $I$ es una región de 95% de credibilidad para $\psi$ si $\mathsf{P}(\psi \in I) = 0.95$.
+
+
+
