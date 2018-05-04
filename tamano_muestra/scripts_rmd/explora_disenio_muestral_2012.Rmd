@@ -23,33 +23,11 @@ comma <- function(x) format(x, digits = 2, big.mark = ",")
 
 ```{r, message=FALSE}
 library(tidyverse)
+library(quickcount)
 library(plotly)
 
-gto <- read_delim("../../datos/Resultados electorales estatales/_11_Guanajuato_2012.txt", 
-    "|", escape_double = FALSE, trim_ws = TRUE, locale = locale(encoding = "ISO-8859-1"))
-#glimpse(gto)
-```
-
-```{r}
-# creamos variable ARE
-gto_votos <- gto %>% 
-    mutate(
-        casilla_id = 1:n(),
-        distrito_f = DISTRITO_FEDERAL_2012, 
-        distrito_l = DISTRITO_LOCAL_2012,
-        are_id = stringr::str_c(distrito_f, 
-            ID_AREA_RESPONSABILIDAD_2E_2012, sep = "-"), 
-        seccion = Seccion,
-        casilla = Tipo_seccion_8feb2012 ,
-        pri = PRI + PVEM + `PRI-PVEM`, 
-        pan = PAN + `PAN-NA` + X13, 
-        prd = PRD, 
-        otros = PT + MC + `No registrados` + Nulos,
-        total = pri + pan + prd + otros,
-        ln = LN
-        ) %>% 
-    select(casilla_id:ln) 
-
+data("gto_2012")
+glimpse(gto_2012)
 ```
 
 * Usando asignación proporcional al tamaño de cada estrato en la elección 
@@ -62,15 +40,14 @@ ID_AREA_RESPONSABILIDAD_2E_2012, de esta manera resulta que contamos con
 Resultados de elección estatal 2012:
 
 ```{r}
-p_partido <- gto_votos %>% 
-    gather(partido, votos, pri:otros) %>% 
+p_partido <- gto_2012 %>% 
+    gather(partido, votos, pri_pvem:otros) %>% 
     group_by(partido) %>% 
     summarise(n_votos = sum(votos)) %>% 
     mutate(p_votos = round(100 * n_votos / sum(n_votos), 2)) %>% 
     arrange(-p_votos)
 p_partido %>% 
     knitr::kable()
-    
 ```
 
 ### Benchmark MAS
