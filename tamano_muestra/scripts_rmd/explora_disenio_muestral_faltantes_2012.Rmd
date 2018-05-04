@@ -75,6 +75,7 @@ p_partido %>%
     
 ```
 ### Faltantes not missign at random
+
 Simularemos los faltantes de acuerdo a la llegada de las remesas en la elección
 presidencial de 2012 (para Gto.).
 
