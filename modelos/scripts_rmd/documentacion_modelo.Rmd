@@ -1,23 +1,47 @@
 ---
 title: "Procedimiento de estimación"
-output: html_notebook
+output: word_document
 ---
 
 <!-- La estadística bayesiana es una alternativa a la estadística frecuentista que permite cuantificar la incertidumbre sobre los parámetros desconocidos del modelo mediante distribuciones de probabilidad.   -->
 
-El modelo que utilizaremos para estimar la proporción de votos a favor de cada uno de los candidatos es un modelo Bayesiano de postestratificación con regresión multinivel (Park, Gelman and Bafumi (2004)), que es un método popular para corregir diferencias conocidas entre la muestra y las poblaciones objetivo (Little, 1993). La idea central es dividir a la población en células basadas en combinaciones de diversos atributos demográficos o geográficos, usar la muestra para estimar la variable de respuesta dentro de cada célula, y finalmente agregar las estimaciones de cada célula para estimar a nivel poblacional, ponderando cada célula por su proporción relativa en la población. Así pues, en nuestro escenario, el método se compone por dos pasos, el primero es utilizar una regresión multinivel para estimar el total de votos por casilla y el segundo es postestratificar, es decir, ponderar los votos de cada casilla para obtener los votos por candidato de la población total.
+El modelo que utilizaremos para estimar la proporción de votos a favor de cada uno de los candidatos es un modelo Bayesiano de postestratificación con regresión multinivel (Park, Gelman and Bafumi (2004)), que es un método popular para corregir diferencias conocidas entre la muestra y las poblaciones objetivo (Little, 1993). La idea central es dividir a la población en celdas basadas en combinaciones de diversos atributos demográficos o geográficos, usar la muestra para estimar la variable de respuesta dentro de cada celda, y finalmente agregar las estimaciones de cada celda para estimar a nivel poblacional, ponderando cada celda por su proporción relativa en la población. 
 
-Una regresión multinivel es una regresión en la que los parámetros reciben un modelo de probabilidad. Este modelo de segundo nivel tiene sus propios parámetros, conocidos como hiperparámetros, que también se estiman a partir de los datos. La ganacia principal de utilizar regresión multinivel está en que podemos estudiar los efectos que varían según la célula. Adicionalemente, es posible ajustar más exactamente la falta de respuesta.
+Así pues, en nuestro escenario, para cada candidato el procedimiento se puede 
+resumir como sigue:
+
+1. Se ajusta un modelo de regresión multinivel a nivel casilla para el número 
+de votos en favor del candidato $y$ condicional a demográficos y variables geográficas. Por tanto, el modelo estima una respuesta promedio $\theta_l$ para 
+cada combinación de demográficos y variables geográficas.
+
+2. Utilizamos la información del marco muestral para determinar el número de 
+casillas $N_l$ en cada categoría $l$. Es así que la estimación del promedio
+poblacional para el candidato $y$ es:
+
+$$\theta = \frac{\sum_{l}N_l\theta_l}{\sum_{l}N_l}$$
+
+
+
+Una regresión multinivel es una regresión en la que los parámetros reciben un 
+modelo de probabilidad. Este modelo de segundo nivel tiene sus propios 
+parámetros, conocidos como hiperparámetros, que también se estiman a partir de 
+los datos. La ganacia principal de utilizar regresión multinivel está en que 
+podemos estudiar los efectos que varían según la celda. Adicionalemente, es 
+posible ajustar más exactamente la falta de respuesta.  (hablar de unir fuerzas?
+es decir, si no llega un estrato no te restringes a la inicial sino que utilizas
+la info de los estratos que si llegaron?)
 
 Las variables demográficas y geográficas que utilizaremos son:
 
 1) Tipo de sección (rural o urbana/mixta)
 2) Tipo de casilla (básica/contigua/especial o extraordinaria)
 3) Tamaño de sección (chica que es menor a 1000 votantes en la lista nominal, mediana, de 1000 a 5000 votantes o grande, con más de 5000 )
-4) Región (oriente o oxidente)
-5) Distrito local
+4) Región (oriente u occidente)
+5) Distrito local 2017
 
-Además de cada una de las variables, es natural considerar la interacción de tipo de sección con tamaño de sección, pues la relación entre el tipo de sección y la proporción de votos por un candidato es diferente en secciones de distinto tamaño.
+También incluimos la interacción de tipo de sección con tamaño de sección, pues 
+la relación entre el tipo de sección y la proporción de votos por un candidato 
+es diferente en secciones de distinto tamaño.
 
 Cuando las variables tienen menos de tres categorías, no hay ninguna ganancia en usar un modelo multinivel contra usar distribuciones iniciales no informativas (vease, por ejemplo, Gelman et. al. 2003 y Gelman 2004), por lo que, por simplicidad, modelaremos las variables 1) a 4) como coeficientes de regresión sin estructura multinivel.
 
@@ -25,7 +49,7 @@ El marco muestral consiste en un total de $K$ casillas electorales que se instal
 
 <!-- El total de $K$ casillas electorales se reparte en $N$ estratos. Se denotará con $K_i$ al número de casillas en el estrato $i$ para $i=1,...,N$ de modo que $\sum_{i=1}^N K_i = K$ y con $n_k$ al tamaño de la lista nominal en el estrato $i$,  -->
 
-Supongamos que queremos estimar primero el número total de votos para uno de los candidatos, por lo que en lo que sigue omitiremos el superíndice que indica el candidato. Sea $X_k$ el número de votos en favor del candidato en la $k$-ésima casilla, en el primer nivel el modelo asume que:
+Supongamos que queremos estimar primero el número total de votos para uno de los candidatos, por lo que en lo que sigue omitiremos el superíndice que indicaría el candidato. Sea $X_k$ el número de votos en favor del candidato en la $k$-ésima casilla, en el primer nivel el modelo asume que:
 
 
 <!-- y sea $N_E$ el número de estratos del estado. Del total de casillas en el estado se seleccionan $c$ de ellas, repartidas en $c_i$ para cada uno de los estratos  $i=1,...,N_E$ de modo que $\sum_{i=1}^{N_E} c_i = c$. -->
