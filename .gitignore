@@ -5,6 +5,5 @@
 .Ruserdata
 datos/
 basura/
-*.html
 *_cache/
 .DS_Store
