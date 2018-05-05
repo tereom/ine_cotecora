@@ -1,0 +1,381 @@
+---
+title: "Muestras calibración"
+output: html_notebook
+---
+
+```{r, message = FALSE, warning = FALSE}
+#devtools::install_github("tereom/quickcountmx", force = TRUE)
+devtools::install("quickcountmx")
+library(quickcountmx)
+library(tidyverse)
+a <- eval(parse(text=deparse(quickcountmx:::model_bern_t)[3] ))
+model_string %>% cat
+```
+
+```{r}
+data("gto_2012")
+marco <- group_by(gto_2012, distrito_loc_17) %>% summarise(n_stratum = n())
+
+actual <- gto_2012 %>%
+  gather(party, n_votes, pri_pvem:otros) %>% 
+  select(party, n_votes) %>%
+  group_by(party) %>% summarise(n_votes = sum(n_votes)) %>%
+  mutate(prop_votes = n_votes/sum(n_votes))
+  
+completas_nom <- list.files("./muestras_gto/datos/muestras/completas",
+           full.names = TRUE)
+f_casilla_nom <- list.files("./muestras_gto/datos/muestras/faltantes_casilla",
+           full.names = TRUE)
+f_estrato_nom <- list.files("./muestras_gto/datos/muestras/faltantes_estrato",
+           full.names = TRUE)
+```
+
+
+```{r, message=FALSE}
+datos_1 <- map(completas_nom,
+    function(nom, id){
+      df_leer <- read_csv(nom)
+      df_leer$nom_sim <- nom
+      df_leer <- df_leer %>% left_join(marco %>% select(distrito_loc_17, n_stratum))
+      df_leer 
+  })
+```
+
+### Ratio estimate: complete data
+
+```{r}
+estimacion_razon <- datos_1 %>% 
+  parallel::mclapply(function(dat){
+  df_ratio <- ratio_estimation(dat, stratum = distrito_loc_17, 
+                               n_stratum = n_stratum, ... = pri_pvem:otros)
+  df_ratio <- df_ratio %>% mutate(nom_sim = dat$nom_sim[1]) %>%
+    left_join(actual, by = "party")
+  }, mc.cores = 36 ) %>% bind_rows()
+```
+
+```{r}
+ggplot(estimacion_razon, aes(
+  x = as.numeric(str_extract(nom_sim, pattern = "(\\d)+")), 
+  y = r, ymin = r - 2*std_error, ymax = r + 2*std_error)) +
+  geom_linerange(colour = "red") + 
+  facet_wrap(~party, scales = 'free_y') +
+  geom_hline(aes(yintercept = 100*prop_votes))
+```
+
+```{r}
+coverage <- estimacion_razon %>% 
+  mutate(coverage = 
+           (r - 2*std_error < 100*prop_votes) & (r + 2*std_error > 100*prop_votes)) %>%
+  group_by(party) %>% summarise(coverage = mean(coverage))
+coverage
+```
+
+### Bayesian: complete data
+
+
+```{r}
+cl_cores <- 6
+seed <- 1233
+clust <-parallel::makeCluster(getOption("cl.cores", cl_cores))
+parallel::clusterSetRNGStream(clust, seed)
+parallel::clusterExport(clust, "gto_2012")
+parallel::clusterExport(clust, "datos_1")
+parallel::clusterExport(clust, "actual")
+parallel::clusterEvalQ(clust, {
+  library(quickcountmx)
+  library(tidyverse)
+})
+
+estimacion_b <- 
+  parallel::parLapply(clust, 1:length(datos_1),  function(i){
+    dat <- datos_1[[i]]
+    id_sample <- dat$casilla_id
+    dat_sample <- gto_2012 %>% gather(party, n_votes, pri_pvem:otros) %>%
+      mutate(n_votes = ifelse(casilla_id %in% id_sample, n_votes, NA)) %>%
+      spread(party, n_votes) %>% 
+      select(pri_pvem, pan_na, prd, pt, mc, otros, everything())
+    res <- mrp_estimation(dat_sample,  ... = pri_pvem:otros,
+                        stratum = distrito_loc_17, 
+                        n_iter = 3500, n_burnin = 1500, n_chains = 1,
+                        parallel = TRUE)
+    df_res <- res$post_summary %>% dplyr::left_join(actual, by = "party") %>% 
+          dplyr::mutate(nom_sim = dat$nom_sim[1])
+  }) %>% bind_rows()
+```
+
+```{r}
+ggplot(estimacion_b, aes(
+  x = as.numeric(str_extract(nom_sim, pattern = "(\\d)+")), 
+  y = mean_post, ymin = mean_post - 2*std_dev_post, ymax = mean_post + 2*std_dev_post)) +
+  geom_linerange(colour = "red") + 
+  facet_wrap(~party, scales = 'free_y') +
+  geom_hline(aes(yintercept = 100*prop_votes))
+```
+
+
+```{r}
+parallel::stopCluster(clust)
+coverage <- estimacion_b %>% 
+  mutate(coverage = 
+           (mean_post - 2*std_dev_post < 100*prop_votes) & (mean_post + 2*std_dev_post > 100*prop_votes)) %>%
+  group_by(party) %>% 
+  summarise(coverage = mean(coverage), precision = mean(2*std_dev_post), n_sims = length(mean_post))
+coverage
+```
+
+
+### Ratio estimate: missing strata
+
+
+
+```{r ratiomis, message=FALSE}
+set.seed(12121)
+datos_e <- map(f_estrato_nom,
+    function(nom, id){
+      df_leer <- read_csv(nom)
+      df_leer$nom_sim <- nom
+      df_leer <- df_leer %>% left_join(marco %>% select(distrito_loc_17, n_stratum))
+      df_leer 
+  })
+datos_casilla <- datos_e
+```
+
+```{r}
+calib_ratio_miss <- parallel::mclapply(1:100, function(i) {
+  # select sample
+  strata <- unique(marco$distrito_loc_17)
+  present <- unique(datos_casilla[[i]]$distrito_loc_17)
+  missing <- setdiff(strata, present)
+  collapse_to <- sample(present, length(missing))
+  new_strata <- data_frame(distrito_loc_17 = c(missing, present), 
+             estrato_nuevo = c(collapse_to, present))
+  collapsed  <- left_join(marco, new_strata, by = "distrito_loc_17") %>% group_by(estrato_nuevo) %>%
+    summarise(n_stratum=sum(n_stratum))
+  datos_cas_collapsed <- datos_casilla[[i]] %>%
+    select(-n_stratum) %>%
+    left_join(new_strata, by = "distrito_loc_17") %>%
+    left_join(collapsed, by = "estrato_nuevo") 
+  ratio <- ratio_estimation(datos_cas_collapsed, stratum = estrato_nuevo, 
+                            n_stratum = n_stratum, ... = pri_pvem:otros)
+  ratio <- ratio %>% mutate(nom_sim = datos_casilla[[i]]$nom_sim[1])
+  ratio 
+  }, mc.cores = 20) %>% bind_rows
+
+```
+
+```{r}
+calib_ratio_miss <- calib_ratio_miss %>% left_join(actual, by = "party")
+```
+
+
+```{r}
+ggplot(calib_ratio_miss, aes(
+  x = as.numeric(str_extract(nom_sim, pattern = "(\\d)+")), 
+  y = r, ymin = r - 2*std_error, ymax = r + 2*std_error)) +
+  geom_point() + geom_linerange(colour = "red") + 
+  facet_wrap(~party, scales = 'free_y') +
+  geom_hline(aes(yintercept = 100*prop_votes))
+```
+
+```{r}
+coverage <- calib_ratio_miss %>% 
+  mutate(coverage = 
+           (r - 2*std_error < 100*prop_votes) & (r + 2*std_error > 100*prop_votes)) %>%
+  group_by(party) %>% summarise(coverage = mean(coverage))
+coverage
+```
+
+
+
+
+### Ratio estimate: Missing voting stations
+
+```{r ratiomis2, warnings = FALSE, message=FALSE}
+set.seed(12121)
+datos_c <- map(f_casilla_nom,
+    function(nom, id){
+      df_leer <- read_csv(nom)
+      df_leer$nom_sim <- nom
+      df_leer <- df_leer %>% left_join(marco %>% select(distrito_loc_17, n_stratum))
+      df_leer 
+  })
+datos_casilla <- datos_c
+
+calib_ratio <- parallel::mclapply(1:100, function(i) {
+  # select sample
+  strata <- unique(marco$distrito_loc_17)
+  present <- unique(datos_casilla[[i]]$distrito_loc_17)
+  missing <- setdiff(strata, present)
+  collapse_to <- sample(present, length(missing))
+  new_strata <- data_frame(distrito_loc_17 = c(missing, present), 
+             estrato_nuevo = c(collapse_to, present))
+  collapsed  <- left_join(marco, new_strata, by = "distrito_loc_17") %>% group_by(estrato_nuevo) %>%
+    summarise(n_stratum=sum(n_stratum))
+  datos_cas_collapsed <- datos_casilla[[i]] %>%
+    select(-n_stratum) %>%
+    left_join(new_strata, by = "distrito_loc_17") %>%
+    left_join(collapsed, by = "estrato_nuevo") 
+  ratio <- ratio_estimation(datos_cas_collapsed, stratum = estrato_nuevo, 
+                            n_stratum = n_stratum, ... = pri_pvem:otros)
+  ratio <- ratio %>% mutate(nom_sim = datos_casilla[[i]]$nom_sim[1])
+  ratio 
+  }, mc.cores = 20) %>% bind_rows
+```
+
+```{r}
+calib_ratio <- calib_ratio %>% left_join(actual, by = "party")
+```
+
+
+```{r}
+ggplot(calib_ratio, aes(
+  x = as.numeric(str_extract(nom_sim, pattern = "(\\d)+")), 
+  y = r, ymin = r - 2*std_error, ymax = r + 2*std_error)) +
+  geom_point() + geom_linerange(colour = "red") + 
+  facet_wrap(~party, scales = 'free_y') +
+  geom_hline(aes(yintercept = 100*prop_votes))
+```
+
+```{r}
+coverage <- calib_ratio %>% 
+  mutate(coverage = 
+           (r - 2*std_error < 100*prop_votes) & (r + 2*std_error > 100*prop_votes)) %>%
+  group_by(party) %>% summarise(coverage = mean(coverage))
+coverage
+```
+
+
+
+
+
+### Bayesian: Missing strata
+
+
+```{r}
+datos_e <- map(f_estrato_nom,
+    function(nom, id){
+      df_leer <- read_csv(nom)
+      df_leer$nom_sim <- nom
+      df_leer <- df_leer %>% left_join(marco %>% select(distrito_loc_17, n_stratum))
+      df_leer 
+  })
+cl_cores = 6
+seed = 123
+clust <-parallel::makeCluster(getOption("cl.cores", cl_cores))
+parallel::clusterSetRNGStream(clust, seed)
+parallel::clusterExport(clust, "gto_2012")
+parallel::clusterExport(clust, "datos_e")
+parallel::clusterExport(clust, "actual")
+parallel::clusterEvalQ(clust, {
+  library(quickcountmx)
+  library(tidyverse)
+})
+
+estimacion_b_miss_str <- 
+  parallel::parLapply(clust, 1:length(datos_e),  function(i){
+    dat <- datos_e[[i]]
+    id_sample <- dat$casilla_id
+    dat_sample <- gto_2012 %>% gather(party, n_votes, pri_pvem:otros) %>%
+      mutate(n_votes = ifelse(casilla_id %in% id_sample, n_votes, NA)) %>%
+      spread(party, n_votes) %>% 
+      select(pri_pvem, pan_na, prd, pt, mc, otros, everything())
+    res <- mrp_estimation(dat_sample,  ... = pri_pvem:otros,
+                        stratum = distrito_loc_17, 
+                        n_iter = 3000, n_burnin = 1000, n_chains = 1,
+                        cl_clust = 1, parallel = TRUE)
+    df_res <- res$post_summary %>% dplyr::left_join(actual, by = "party") %>% 
+          dplyr::mutate(nom_sim = dat$nom_sim[1])
+  }) %>% bind_rows()
+```
+
+```{r}
+ggplot(estimacion_b_miss_str, aes(
+  x = as.numeric(str_extract(nom_sim, pattern = "(\\d)+")), 
+  y = mean_post, ymin = mean_post - 2*std_dev_post, ymax = mean_post + 2*std_dev_post)) +
+  geom_point() + geom_linerange(colour = "red") + 
+  facet_wrap(~party, scales = 'free_y') +
+  geom_hline(aes(yintercept = 100*prop_votes))
+```
+
+
+```{r}
+coverage <- estimacion_b_miss_str %>% 
+  mutate(coverage = 
+           (mean_post - 2*std_dev_post < 100*prop_votes) & (mean_post + 2*std_dev_post > 100*prop_votes)) %>%
+  group_by(party) %>% summarise(coverage = mean(coverage))
+coverage
+```
+
+
+
+
+
+
+
+
+```{r}
+parallel::stopCluster(clust)
+```
+
+### Bayesian:  missing voting stations
+
+
+```{r}
+datos_c <- map(f_casilla_nom,
+    function(nom, id){
+      df_leer <- read_csv(nom)
+      df_leer$nom_sim <- nom
+      df_leer <- df_leer %>% left_join(marco %>% select(distrito_loc_17, n_stratum))
+      df_leer 
+  })
+cl_cores = 6
+seed = 123
+clust <-parallel::makeCluster(getOption("cl.cores", cl_cores))
+parallel::clusterSetRNGStream(clust, seed)
+parallel::clusterExport(clust, "gto_2012")
+parallel::clusterExport(clust, "datos_c")
+parallel::clusterExport(clust, "actual")
+parallel::clusterEvalQ(clust, {
+  library(quickcountmx)
+  library(tidyverse)
+})
+
+estimacion_b_miss_casilla <- 
+  parallel::parLapply(clust, 1:length(datos_c),  function(i){
+    dat <- datos_c[[i]]
+    id_sample <- dat$casilla_id
+    dat_sample <- gto_2012 %>% gather(party, n_votes, pri_pvem:otros) %>%
+      mutate(n_votes = ifelse(casilla_id %in% id_sample, n_votes, NA)) %>%
+      spread(party, n_votes) %>% 
+      select(pri_pvem, pan_na, prd, pt, mc, otros, everything())
+    res <- mrp_estimation(dat_sample,  ... = pri_pvem:otros,
+                        stratum = distrito_loc_17, 
+                        n_iter = 3000, n_burnin = 1000, n_chains = 1,
+                        cl_clust = 1, parallel = TRUE)
+    df_res <- res$post_summary %>% dplyr::left_join(actual, by = "party") %>% 
+          dplyr::mutate(nom_sim = dat$nom_sim[1])
+  }) %>% bind_rows()
+```
+
+```{r}
+ggplot(estimacion_b_miss_casilla, aes(
+  x = as.numeric(str_extract(nom_sim, pattern = "(\\d)+")), 
+  y = mean_post, ymin = mean_post - 2*std_dev_post, ymax = mean_post + 2*std_dev_post)) +
+  geom_point() + geom_linerange(colour = "red") + 
+  facet_wrap(~party, scales = 'free_y') +
+  geom_hline(aes(yintercept = 100*prop_votes))
+```
+
+
+```{r}
+coverage <- estimacion_b_miss_casilla %>% 
+  mutate(coverage = 
+           (mean_post - 2*std_dev_post < 100*prop_votes) & (mean_post + 2*std_dev_post > 100*prop_votes)) %>%
+  group_by(party) %>% summarise(coverage = mean(coverage))
+coverage
+```
+
+
+```{r}
+parallel::stopCluster(clust)
+```
