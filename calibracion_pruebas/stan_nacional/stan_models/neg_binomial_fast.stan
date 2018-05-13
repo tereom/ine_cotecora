@@ -61,9 +61,13 @@ generated quantities {
   real pred_f;
   y_out = 0;
   for(i in 1:N_f){
+   if(in_sample[i]==1){
+	y_out += y_f[i];
+   } else {
     pred_f = dot_product(x_f[i,], beta);
     theta_f = inv_logit(beta_st[stratum_f[i]] + pred_f);
     alpha_bn_f =  n_f[i] * theta_f;
     y_out += neg_binomial_2_rng(alpha_bn_f , beta_bn[stratum_f[i]]*alpha_bn_f);
+   }
   }
 }
